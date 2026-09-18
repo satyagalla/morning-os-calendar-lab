@@ -1,11 +1,14 @@
 import { Modal, Notice, Platform, Plugin, TFile, TFolder, apiVersion, requestUrl } from "obsidian";
 import { ProbeSession } from "./session";
 import { AuthProbe, AUTH_ACTION } from "./auth";
+import { CalendarProbe } from "./calendar";
 
 const ACTION = "morning-os-calendar-lab-probe";
 const MARKER_KEY = "morning-os-calendar-lab:restart-marker";
 const REPORT_ROOT = "Tests/Morning OS Calendar";
 const PUBLIC_URL = "https://accounts.google.com/.well-known/openid-configuration";
+const CALENDAR_JOURNAL = "morning-os-calendar-lab:calendar-journal-v1";
+const CREDENTIAL_KEY = "morning-os-calendar-lab-login-v1";
 
 function randomHex(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -24,6 +27,21 @@ export default class CalendarLab extends Plugin {
   readonly auth = new AuthProbe(async (url, key, body) => {
     const response = await requestUrl({ url, method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body), throw: false });
     return { status: response.status, data: JSON.parse(response.text) as unknown };
+  }, message => this.record(message), {
+    read: () => this.app.secretStorage.getSecret(CREDENTIAL_KEY),
+    write: value => this.app.secretStorage.setSecret(CREDENTIAL_KEY, value),
+  });
+  readonly calendar = new CalendarProbe(async ({ method, path, body, etag }) => {
+    const token = await this.auth.accessToken();
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (body) headers["Content-Type"] = "application/json";
+    if (etag) headers["If-Match"] = etag;
+    const response = await requestUrl({ url: "https://www.googleapis.com/calendar/v3" + path, method, headers,
+      ...(body ? { body: JSON.stringify(body) } : {}), throw: false });
+    return { status: response.status, data: response.text ? JSON.parse(response.text) as unknown : null };
+  }, {
+    read: () => this.app.loadLocalStorage(CALENDAR_JOURNAL) as unknown,
+    write: value => this.app.saveLocalStorage(CALENDAR_JOURNAL, value),
   }, message => this.record(message));
 
   onload(): void {
@@ -36,6 +54,7 @@ export default class CalendarLab extends Plugin {
   }
 
   onunload(): void {
+    this.calendar.stop();
     this.session.clear();
     this.syntheticLinks = null;
     this.auth.clear();
@@ -75,10 +94,10 @@ export default class CalendarLab extends Plugin {
       `Plugin: ${this.manifest.version}; Obsidian: ${apiVersion}; platform: ${platform}`,
       `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
       "OS version: fill in manually. Calendar client/version: fill in manually.", "",
-      "This report contains only explicit probe outcomes from this plugin session. OAuth occurs only when explicitly started. No calendar API writes are implemented.", "",
+      "This report contains only explicit probe outcomes from this plugin session. Calendar writes occur only through explicit lab actions on a dedicated test calendar.", "",
       ...this.outcomes.map(line => `- ${line}`), "",
       "Manual observations: record whether the external browser opened, which vault received the callback, and whether app restart/backgrounding behaved as expected.", "",
-      "Untested outcomes must not be inferred from other passes. Persistent credential storage, ETags, conflict recovery, cancellation, and notifications remain pending.", "",
+      "Untested outcomes must not be inferred from other passes. Simulated lost replies and stale requests do not establish multi-device ordering. Notification delivery requires manual observation.", "",
     ].join("\n");
     const file = await this.app.vault.create(reportPath, content);
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
@@ -91,7 +110,7 @@ class LabModal extends Modal {
   onOpen(): void {
     const root = this.contentEl;
     root.createEl("h2", { text: "Calendar Lab" });
-    root.createEl("p", { text: "Device and optional Google authentication probes. No task changes or calendar events. Results and login credentials stay in memory; export results before restarting." });
+    root.createEl("p", { text: "Device, Google login and dedicated test-calendar probes. No Morning OS task access. Export results before restarting." });
     const status = root.createEl("p", { text: "Choose a probe." });
     const action = (name: string, run: () => void | Promise<void>) => {
       const button = root.createEl("button", { text: name });
@@ -105,7 +124,7 @@ class LabModal extends Modal {
       });
     };
     root.createEl("h3", { text: "Google authentication lab" });
-    root.createEl("p", { text: "Use your own deployed Calendar Lab service. Enter its HTTPS address and separate lab access key (never your Google client secret). Credentials are sent to that service and kept only for this Obsidian session." });
+    root.createEl("p", { text: "Use your deployed Calendar Lab service. Enter its HTTPS address and lab access key (never your Google client secret). Credentials stay in memory unless you save login below. To restore an existing saved login, skip configuration and use Restore saved login." });
     const serviceUrl = root.createEl("input", { attr: { type: "url", placeholder: "https://morning-os-calendar-lab-auth.YOUR-SUBDOMAIN.workers.dev", "aria-label": "Auth service URL" } });
     const serviceKey = root.createEl("input", { attr: { type: "password", autocomplete: "off", placeholder: "Lab access key", "aria-label": "Lab access key" } });
     action("Use service for this session", () => { this.lab.auth.configure(serviceUrl.value, serviceKey.value); serviceKey.value = ""; });
@@ -121,13 +140,29 @@ class LabModal extends Modal {
     action("Prepare Google login", async () => { await this.lab.auth.start(this.app.vault.getName()); showGoogleLink(); });
     action("Complete pending login", async () => { await this.lab.auth.complete(undefined, undefined, true); showGoogleLink(); });
     action("Test token refresh", () => this.lab.auth.refresh());
+    root.createEl("p", { text: "Optional restart test: save this login in Obsidian SecretStorage, export results, restart, then restore saved login. The saved refresh token and lab key are vault-local app data accessible to other plugins, not an isolated OS keychain. No login is restored automatically." });
+    action("Save login for restart test", () => this.lab.auth.saveLogin());
+    action("Restore saved login", () => this.lab.auth.restoreLogin());
     root.createEl("p", { text: "Revocation removes this Google app's authorization and can affect other test devices using the same Google account and OAuth client." });
     action("Revoke Google authorization", () => this.lab.auth.revoke());
     action("Forget local login and service key", () => {
-      this.lab.auth.clear(); serviceKey.value = ""; showGoogleLink();
-      this.lab.record("Local login forgotten. This does not revoke Google authorization; use Google Account connections if needed.");
+      this.lab.auth.forget(); serviceKey.value = ""; showGoogleLink();
+      this.lab.record("In-memory and saved login forgotten. This does not revoke Google authorization; use Google Account connections if needed.");
     });
     showGoogleLink();
+    root.createEl("h3", { text: "Dedicated calendar tests" });
+    root.createEl("p", { text: "These buttons write to Google Calendar. Create one dedicated lab calendar, then one event starting in 10 minutes with an alert one minute before. Do not invite guests or edit ownership descriptions. The recovery journal stays in this device's vault-local app storage. It is not a multi-device synchronization solution." });
+    action("Create dedicated test calendar", async () => { await this.lab.auth.accessToken(); await this.lab.calendar.createCalendar(); });
+    action("Create notification event", () => this.lab.calendar.createEvent());
+    action("Create event and simulate lost reply", () => this.lab.calendar.createEvent(true));
+    action("Recover event or pending cancellation", () => this.lab.calendar.recoverEvent());
+    action("Test stale update and delete (ETags)", () => this.lab.calendar.staleWrites());
+    root.createEl("p", { text: "Observe the alert before cancellation. For interrupted cancellation: save intent, export results, restart Obsidian, restore login, then recover. Cancellation remains recorded to prevent this lab from recreating the event." });
+    action("Save cancellation intent without sending", () => this.lab.calendar.cancelEvent(true));
+    action("Cancel test event now", () => this.lab.calendar.cancelEvent());
+    root.createEl("p", { text: "If calendar creation lost its reply, copy that lab calendar's ID from Google Calendar settings. Recovery accepts only its exact saved ownership marker. Never create another calendar blindly." });
+    const calendarId = root.createEl("input", { attr: { type: "text", placeholder: "Lab calendar ID (only for recovery)", "aria-label": "Lab calendar ID" } });
+    action("Recover uncertain calendar creation", () => this.lab.calendar.recoverCalendar(calendarId.value));
     root.createEl("h3", { text: "Device and synthetic probes" });
     action("Test Web Crypto", () => this.lab.capabilities());
     root.createEl("p", { text: "The next probe makes one unauthenticated GET to Google's public identity configuration. It sends no vault content or credentials." });

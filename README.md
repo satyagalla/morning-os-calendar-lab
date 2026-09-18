@@ -1,15 +1,17 @@
 # Morning OS Calendar Lab
 
-An independent Obsidian plugin for testing the desktop/iPhone/Android capabilities needed by a future Morning OS calendar integration. Plugin ID: `morning-os-calendar-lab`. Minimum Obsidian version: 1.8.7.
+An independent Obsidian plugin for testing the desktop/iPhone/Android capabilities needed by a future Morning OS calendar integration. Plugin ID: `morning-os-calendar-lab`. Minimum Obsidian version: 1.11.4 (SecretStorage). This lab-only change was approved by the user; Morning OS is unchanged.
 
-Version 0.2.0 adds optional Google login, refresh and revocation probes with a deployable Cloudflare service. It does not read Morning OS state or call calendar APIs. Tokens and the lab access key stay in memory only. Follow [service setup and iPhone test steps](service/SETUP.md).
+Version 0.3.0 adds opt-in saved login and explicit dedicated-calendar probes: insertion, simulated lost-reply recovery, stale PATCH/DELETE rejection, notification setup and durable local cancellation intent. It does not read Morning OS tasks. Follow [service setup](service/SETUP.md), [restart tests](test-kit/Credential%20Persistence.md), then [calendar tests](test-kit/Calendar%20Writes.md).
+
+No Worker update or broader scope is needed. The service still reports 0.2.0. Login saving and restoring are explicit. SecretStorage is vault-local app storage accessible to other plugins, not an isolated OS keychain. Access tokens and pending consent stay in memory. No credentials are written to plugin data.json or test notes.
 
 ## Install with BRAT
 
 1. In the target mobile vault, open Settings → Community plugins → Browse, install **BRAT**, and enable it.
 2. For a private repository, configure a GitHub token in BRAT with read-only access to this repository's contents. Enter it only in BRAT, never in test notes or chat. Follow [BRAT's private-repository guide](https://tfthacker.com/brat-private-repo).
 3. Run **BRAT: Add a beta plugin for testing** from the command palette.
-4. Enter `satyagalla/morning-os-calendar-lab`. Install version `0.2.0` (or use BRAT's frozen-version command to pin that tag).
+4. Enter `satyagalla/morning-os-calendar-lab`. Install version `0.3.0` (or use BRAT's frozen-version command to pin that tag).
 5. Enable **Morning OS Calendar Lab** in Community plugins.
 6. Run **Morning OS Calendar Lab: Open device test panel**.
 
@@ -34,13 +36,13 @@ Test sheets are in [test-kit](test-kit/). Copy them into the vault test folder o
 
 ## What remains unproven
 
-- Registered HTTPS OAuth redirect, consent scopes, token exchange and refresh.
-- Secret storage choice and minimum-version decision.
+- Persistent login after restart (live iPhone login, refresh and revocation passed in 0.2.0; see [observed results](test-kit/Observed%20iPhone%20results.md)).
+- SecretStorage device isolation, backup behavior and production storage choice.
 - Actual provider conditional headers, ETags, rate limits, and concurrent creation.
 - Durable ordering, cancellation fences, stale-device recovery, and overdue changes.
 - Apple Calendar and Windows notification delivery with Obsidian closed.
 
-The browser link opens a public configuration document. Synthetic callbacks test `obsidian://` handoff, **not** an HTTPS callback bridge or Google's acceptance of an OAuth redirect. The included service must be deployed and configured before real login. Local tests mock Google; live OAuth still needs device results.
+The browser link opens a public configuration document. Synthetic callbacks test `obsidian://` handoff, **not** an HTTPS callback bridge or Google's acceptance of an OAuth redirect. The included service must be deployed and configured before real login. Local tests mock Google; live OAuth results are recorded separately from untested calendar behavior.
 
 See [research.md](research.md) for the existing source review and acceptance gates. No third-party source snapshots, tokens, or Morning OS vault content are included in this repository.
 
@@ -63,9 +65,9 @@ Builds target browser/ES2020 and allow only `obsidian` as an external runtime im
 Keep `package.json` and `manifest.json` versions aligned. Build and test, commit the source, and then publish a GitHub release with a matching version tag and these assets:
 
 ```sh
-gh release create 0.2.0 main.js manifest.json --repo satyagalla/morning-os-calendar-lab --title 0.2.0 --prerelease --notes-file RELEASE_NOTES.md
+gh release create 0.3.0 main.js manifest.json versions.json --repo satyagalla/morning-os-calendar-lab --title 0.3.0 --prerelease --notes-file RELEASE_NOTES.md
 ```
 
 The version above is the current release; use a new matching version for subsequent releases. Keep updates manual or pin the test version while recording results. There is no stylesheet in this release.
 
-To remove: remove the repository from BRAT's update list, uninstall Calendar Lab in Community plugins, and remove test notes if no longer needed. Clear the marker before uninstalling. Morning OS is a separate plugin and remains installed.
+To remove: cancel the event, revoke the Google grant, select **Forget local login and service key**, and clear the marker before uninstalling Calendar Lab and removing it from BRAT. Manually delete only its dedicated calendar when finished. Morning OS is a separate plugin and remains installed.

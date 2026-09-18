@@ -1,12 +1,11 @@
-Google authentication feasibility lab with a separately deployable Cloudflare Worker.
+Calendar Lab 0.3.0: credential restart and dedicated-calendar probes. Requires Obsidian 1.11.4+ for SecretStorage; Morning OS is unchanged.
 
-- Optional Google consent, HTTPS callback, PKCE-bound single-use redemption, refresh and revocation.
-- Google client secret stays in Worker secrets. Tokens and lab key stay in plugin memory; restart requires a fresh login.
-- App-created-calendar scope only. No calendar API calls or Morning OS task access.
-- Atomic SQLite login sessions expire after ten minutes.
-- Synthetic callback links remain available when reopening the panel.
-- Setup: service/SETUP.md. Deploy/configure the service before real login.
+- Opt-in Save login and manual Restore after restart. Rotation is saved; Forget and confirmed revocation clear saved credentials. SecretStorage is vault-local app storage accessible to other plugins, not an isolated OS keychain.
+- One owned test calendar/event; simulated lost-reply recovery at a stable event ID; stale PATCH/DELETE tests; persistent local cancellation intent and restart recovery.
+- Uncertain calendar creation blocks blind retries and supports ownership-checked manual recovery.
+- Existing Worker 0.2.0 and OAuth scope are reused. Enable Google Calendar API in the project before calendar tests. No Morning OS task content is accessed.
+- Follow test-kit/Credential Persistence.md, then test-kit/Calendar Writes.md. Export results before terminating Obsidian.
 
-Validation: 24 focused checks; local Workers/SQLite with mocked Google; TypeScript/browser build; Worker deployment dry run. Live Google login, persistent credential storage and calendar publishing remain unvalidated.
+Validation: 44 focused checks and TypeScript/browser build passed. Tests mock Google and credential storage. Live iPhone OAuth passed in 0.2.0; persistence, calendar behavior and notification delivery await device results. Distributed ordering and production publishing remain unimplemented.
 
 Update through BRAT, then run Morning OS Calendar Lab: Open device test panel. Revocation can affect other test devices using the same Google account and OAuth client.

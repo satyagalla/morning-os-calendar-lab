@@ -1,6 +1,6 @@
 # Google authentication lab setup
 
-This feasibility service never calls the Calendar API. The plugin requests `calendar.app.created`, permitting secondary calendars created by the app and events on them. Local mocked tests do not establish Google's acceptance of the registered web client and PKCE flow.
+This service never calls the Calendar API; plugin 0.3.0 calls it directly through explicit probes. Scope remains `calendar.app.created`. User-reported iPhone login/refresh/revocation passed in 0.2.0. The Worker stays at 0.2.0; no redeployment is needed for plugin 0.3.0.
 
 ## 1. Deploy the unconfigured service
 
@@ -52,7 +52,7 @@ Save/deploy settings. Open `<PUBLIC_ORIGIN>/health`; expect version `0.2.0` and 
 
 ## 4. Update and test the iPhone plugin
 
-1. In BRAT, update `satyagalla/morning-os-calendar-lab` to **0.2.0**. If pinned to 0.1.0, change the pinned version. Reload the plugin.
+1. In BRAT, update `satyagalla/morning-os-calendar-lab` to **0.3.0** (requires Obsidian 1.11.4+). Change any older pinned version. Reload the plugin.
 2. Run **Morning OS Calendar Lab: Open device test panel**.
 3. Enter the service URL and **lab access key**, then **Use service for this session**. Never enter the Google client secret here.
 4. Tap **Prepare Google login**, then **Open Google consent in browser**. Use Safari/external browser and your registered Google test account.
@@ -61,19 +61,19 @@ Save/deploy settings. Open `<PUBLIC_ORIGIN>/health`; expect version `0.2.0` and 
 7. Tap **Test token refresh**. Expect PASS.
 8. Export sanitized results. Close/reopen the panel and test refresh again; background/return to Obsidian and test again. Export before terminating the app.
 9. Tap **Revoke Google authorization**. Expect PASS. This revokes this app's Google grant and can affect other devices using the same Google account/client.
-10. Separately test denied consent, callback replay, expired login, and app termination during login. Cold start intentionally forgets pending login, tokens, and lab key; configure and start again.
+10. Separately test denied consent, callback replay, expired login, and termination during login. Pending consent remains memory-only. For completed-login persistence, follow [restart tests](../test-kit/Credential%20Persistence.md), then [calendar probes](../test-kit/Calendar%20Writes.md).
 
-For external revocation: sign in, remove the app under [Google Account connections](https://myaccount.google.com/connections), then test refresh; it must fail. If revocation is unconfirmed, retry or remove the grant there. **Forget local login** and termination only clear memory; neither revokes Google access. Lost exchange responses require a new login, preserving single-use redemption.
+For external revocation: sign in, remove the app under [Google Account connections](https://myaccount.google.com/connections), then test refresh; it must fail. If revocation is unconfirmed, retry or remove the grant there. **Forget local login** clears memory and saved credentials; termination clears memory only. Neither revokes Google access. Lost exchange responses require a new login.
 
 ## Boundaries and evidence
 
-- No Google credentials are included in repo/BRAT assets. Plugin tokens and lab key are memory-only. No secret-storage API or minimum-version change.
+- No credentials are included in repo/BRAT assets. Saving refresh token and service configuration in SecretStorage is opt-in; access tokens remain memory-only. Calendar Lab alone requires Obsidian 1.11.4+ with user approval.
 - The service temporarily stores state, vault name, PKCE challenge, expiry and callback code in one SQLite Durable Object per login. An alarm deletes records after ten minutes; expired records are rejected even if alarm execution is delayed. Codes are removed before exchange. Provider tokens pass through the service but are never persisted by its code.
 - State/vault binding, a 256-bit verifier, S256 challenge, atomic single-use redemption, fixed provider URLs/scope, bounded bodies, sanitized failures, no-store responses and generation checks protect this flow. App-return URLs contain routing/state only, never provider tokens or codes.
 - Cloudflare is a trusted processor of the Google secret and transient token exchange. This is not end-to-end encryption between Google and the phone.
 - Google web-client PKCE compatibility/enforcement requires live testing. External/Testing refresh tokens for Calendar normally expire after seven days. Repeated consent can also invalidate older tokens.
 - Native `requestUrl` has no cancellation signal in this integration. Forget/unload ignores late results but cannot cancel requests already sent. Worker provider fetches time out after ten seconds.
-- Persistent credential storage, relaunch recovery, calendar ownership, ETags, ordering, cancellation recovery and notifications remain unimplemented/unvalidated.
+- Persistence, relaunch refresh, ownership, ETags and local cancellation recovery have 0.3.0 probes awaiting live device results. Distributed ordering and production publishing remain unimplemented. Notifications require manual observation.
 
 ## Verify
 

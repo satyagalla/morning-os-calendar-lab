@@ -3,6 +3,13 @@ export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.app.crea
 type Transport = (url: string, key: string, body: Record<string, string>) => Promise<{ status: number; data: unknown }>;
 type Tokens = { access: string; refresh?: string; expires: number };
 type Pending = { state: string; verifier: string; vault: string; expires: number; url: string };
+export type CredentialStore = { read(): string | null; write(value: string): void };
+function configuration(origin: string, key: string): { origin: string; key: string } {
+  const url = new URL(origin.trim());
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("Use an HTTPS service origin");
+  if (!/^[a-f0-9]{64}$/.test(key.trim())) throw new Error("Invalid lab key");
+  return { origin: url.origin, key: key.trim() };
+}
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid response");
   return value as Record<string, unknown>;
@@ -14,19 +21,59 @@ export class AuthProbe {
   private busy = false;
   private tokens: Tokens | null = null;
   private pending: Pending | null = null;
-  constructor(private readonly transport: Transport, private readonly report: (message: string) => void) {}
+  private persistent = false;
+  constructor(private readonly transport: Transport, private readonly report: (message: string) => void, private readonly storage?: CredentialStore) {}
   get loginUrl(): string | undefined { return this.pending?.url; }
   get connected(): boolean { return this.tokens !== null; }
+  async accessToken(): Promise<string> {
+    if (this.busy) throw new Error("Auth operation in progress");
+    if (this.tokens && this.tokens.expires <= Date.now() + 60000) await this.refresh();
+    if (!this.tokens?.access || this.tokens.expires <= Date.now()) throw new Error("Login or refresh required");
+    return this.tokens.access;
+  }
   configure(origin: string, key: string): void {
-    const url = new URL(origin.trim());
-    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("Use an HTTPS service origin");
-    if (!/^[a-f0-9]{64}$/.test(key.trim())) throw new Error("Invalid lab key");
-    this.clear(); this.origin = url.origin; this.key = key.trim();
+    const config = configuration(origin, key);
+    this.forget(); this.origin = config.origin; this.key = config.key;
     this.report("Auth service configured for this session only.");
   }
   clear(): void {
-    this.generation++; this.pending = null; this.tokens = null; this.key = ""; this.origin = "";
+    this.generation++; this.pending = null; this.tokens = null; this.key = ""; this.origin = ""; this.persistent = false;
     // Keep an in-flight operation locked until it settles; late results are ignored.
+  }
+  forget(): void {
+    this.clear();
+    // SecretStorage has no delete API; overwrite our own value with an empty string.
+    this.eraseLogin();
+  }
+  private eraseLogin(): void {
+    if (!this.storage) return;
+    this.storage.write("");
+    if (this.storage.read()) throw new Error("Credential removal readback failed");
+  }
+  saveLogin(): void {
+    if (this.busy || !this.storage || !this.tokens?.refresh) throw new Error("No idle offline login to save");
+    this.writeLogin(); this.persistent = true;
+    this.report("Credential save: PASS; refresh token and service configuration saved in Obsidian SecretStorage. Restart and restore to test persistence.");
+  }
+  private writeLogin(): void {
+    if (!this.storage || !this.tokens?.refresh) throw new Error("No offline login");
+    const value = JSON.stringify({ version: 1, scope: CALENDAR_SCOPE, origin: this.origin, key: this.key, refresh: this.tokens.refresh });
+    this.storage.write(value);
+    if (this.storage.read() !== value) throw new Error("Credential readback failed");
+  }
+  async restoreLogin(): Promise<void> {
+    if (this.busy || this.tokens || this.pending) throw new Error("Restore requires an idle, empty session");
+    const raw = this.storage?.read(); if (!raw || raw.length > 12000) throw new Error("No valid saved credentials");
+    const data = object(JSON.parse(raw) as unknown);
+    if (data.version !== 1 || data.scope !== CALENDAR_SCOPE || typeof data.origin !== "string" || typeof data.key !== "string" ||
+        typeof data.refresh !== "string" || !data.refresh || data.refresh.length > 4096) throw new Error("Invalid saved credentials");
+    const config = configuration(data.origin, data.key);
+    this.clear(); this.origin = config.origin; this.key = config.key; this.persistent = true;
+    this.tokens = { access: "", refresh: data.refresh, expires: 0 };
+    const generation = this.generation;
+    await this.refresh();
+    if (generation === this.generation && this.tokens?.access && this.tokens.expires > Date.now()) this.report("Credential restore: PASS; saved refresh token obtained a new access token. No browser login required.");
+    else if (generation === this.generation) this.report("Credential restore: FAIL; retry refresh or sign in again. No calendar writes made.");
   }
   private async run(operation: (generation: number) => Promise<void>): Promise<void> {
     if (this.busy) { this.report("Auth operation already running; wait for it to finish."); return; }
@@ -89,10 +136,14 @@ export class AuthProbe {
       const { status, data } = await this.call("/refresh", { refresh_token: old.refresh });
       if (generation !== this.generation) return;
       if (status !== 200) {
-        if (status === 401) this.tokens = null;
+        if (status === 401) { this.tokens = null; this.persistent = false; this.eraseLogin(); }
         this.report("Token refresh: FAIL; authorization may need a new login."); return;
       }
       this.tokens = this.parseTokens(data, old);
+      if (this.persistent) {
+        try { this.writeLogin(); }
+        catch { this.report("Credential update: FAIL; current login is in memory but saved credentials may be stale. Save login again before restarting."); }
+      }
       this.report("Token refresh: PASS. No calendar API calls made.");
     });
   }
@@ -102,7 +153,11 @@ export class AuthProbe {
       if (!token) { this.report("No in-memory token to revoke. Use Google Account connections if you restarted or forgot it."); return; }
       const { status, data } = await this.call("/revoke", { refresh_token: token });
       if (generation !== this.generation) return;
-      if (status === 200 && data.revoked === true) { this.tokens = null; this.pending = null; this.report("Google revocation: PASS; local tokens cleared."); }
+      if (status === 200 && data.revoked === true) {
+        this.tokens = null; this.pending = null; this.persistent = false;
+        this.eraseLogin();
+        this.report("Google revocation: PASS; in-memory tokens and saved credentials cleared.");
+      }
       else this.report("Revocation unconfirmed; token retained for retry. You can also remove access in Google Account connections.");
     });
   }

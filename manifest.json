@@ -1,9 +1,9 @@
 {
   "id": "morning-os-calendar-lab",
   "name": "Morning OS Calendar Lab",
-  "version": "0.2.0",
-  "minAppVersion": "1.8.7",
-  "description": "Run isolated device, callback, and optional Google OAuth probes for calendar integration research.",
+  "version": "0.3.0",
+  "minAppVersion": "1.11.4",
+  "description": "Test Google login persistence and isolated calendar recovery, ETags, cancellation, and notifications.",
   "author": "Satya Akhil Galla",
   "isDesktopOnly": false
 }
