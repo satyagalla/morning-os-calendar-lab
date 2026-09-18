@@ -2,14 +2,14 @@
 
 An independent Obsidian plugin for testing the desktop/iPhone/Android capabilities needed by a future Morning OS calendar integration. Plugin ID: `morning-os-calendar-lab`. Minimum Obsidian version: 1.8.7.
 
-Version 0.1.0 is a **device primitive probe**, not a calendar publisher. It does not read Morning OS state, access calendar events, accept credentials, or start Google OAuth. It can run alongside Morning OS.
+Version 0.2.0 adds optional Google login, refresh and revocation probes with a deployable Cloudflare service. It does not read Morning OS state or call calendar APIs. Tokens and the lab access key stay in memory only. Follow [service setup and iPhone test steps](service/SETUP.md).
 
 ## Install with BRAT
 
 1. In the target mobile vault, open Settings → Community plugins → Browse, install **BRAT**, and enable it.
 2. For a private repository, configure a GitHub token in BRAT with read-only access to this repository's contents. Enter it only in BRAT, never in test notes or chat. Follow [BRAT's private-repository guide](https://tfthacker.com/brat-private-repo).
 3. Run **BRAT: Add a beta plugin for testing** from the command palette.
-4. Enter `satyagalla/morning-os-calendar-lab`. Install version `0.1.0` (or use BRAT's frozen-version command to pin that tag).
+4. Enter `satyagalla/morning-os-calendar-lab`. Install version `0.2.0` (or use BRAT's frozen-version command to pin that tag).
 5. Enable **Morning OS Calendar Lab** in Community plugins.
 6. Run **Morning OS Calendar Lab: Open device test panel**.
 
@@ -40,7 +40,7 @@ Test sheets are in [test-kit](test-kit/). Copy them into the vault test folder o
 - Durable ordering, cancellation fences, stale-device recovery, and overdue changes.
 - Apple Calendar and Windows notification delivery with Obsidian closed.
 
-The browser link opens a public configuration document. Synthetic callbacks test `obsidian://` handoff, **not** an HTTPS callback bridge or Google's acceptance of an OAuth redirect. No hosted token service is included. Those require a selected client registration and architecture before implementation.
+The browser link opens a public configuration document. Synthetic callbacks test `obsidian://` handoff, **not** an HTTPS callback bridge or Google's acceptance of an OAuth redirect. The included service must be deployed and configured before real login. Local tests mock Google; live OAuth still needs device results.
 
 See [research.md](research.md) for the existing source review and acceptance gates. No third-party source snapshots, tokens, or Morning OS vault content are included in this repository.
 
@@ -51,19 +51,21 @@ Use Node.js 22 or newer:
 ```sh
 npm ci
 npm test
+npm run test:worker
 npm run build
+npm run service:check
 ```
 
-Builds target browser/ES2020 and allow only `obsidian` as an external runtime import. Node is used only by development tools. The tests exercise callback-session rejection and replay semantics locally; passing tests do not prove native mobile behavior.
+Builds target browser/ES2020 and allow only `obsidian` as an external runtime import. Node is used only by development tools. Tests cover callback rejection/replay, auth lifecycle and the local Workers/SQLite runtime with mocked Google; they do not prove live OAuth or mobile behavior.
 
 ## Release for BRAT
 
 Keep `package.json` and `manifest.json` versions aligned. Build and test, commit the source, and then publish a GitHub release with a matching version tag and these assets:
 
 ```sh
-gh release create 0.1.0 main.js manifest.json --repo satyagalla/morning-os-calendar-lab --title 0.1.0 --prerelease --notes-file RELEASE_NOTES.md
+gh release create 0.2.0 main.js manifest.json --repo satyagalla/morning-os-calendar-lab --title 0.2.0 --prerelease --notes-file RELEASE_NOTES.md
 ```
 
-The version above is the initial release; use a new matching version for subsequent releases. Keep updates manual or pin the test version while recording results. There is no stylesheet in this release.
+The version above is the current release; use a new matching version for subsequent releases. Keep updates manual or pin the test version while recording results. There is no stylesheet in this release.
 
 To remove: remove the repository from BRAT's update list, uninstall Calendar Lab in Community plugins, and remove test notes if no longer needed. Clear the marker before uninstalling. Morning OS is a separate plugin and remains installed.

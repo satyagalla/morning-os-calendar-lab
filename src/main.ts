@@ -1,5 +1,6 @@
 import { Modal, Notice, Platform, Plugin, TFile, TFolder, apiVersion, requestUrl } from "obsidian";
 import { ProbeSession } from "./session";
+import { AuthProbe, AUTH_ACTION } from "./auth";
 
 const ACTION = "morning-os-calendar-lab-probe";
 const MARKER_KEY = "morning-os-calendar-lab:restart-marker";
@@ -19,8 +20,14 @@ function localTimestamp(): string {
 export default class CalendarLab extends Plugin {
   readonly session = new ProbeSession();
   readonly outcomes: string[] = [];
+  syntheticLinks: { state: string; vault: string } | null = null;
+  readonly auth = new AuthProbe(async (url, key, body) => {
+    const response = await requestUrl({ url, method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body), throw: false });
+    return { status: response.status, data: JSON.parse(response.text) as unknown };
+  }, message => this.record(message));
 
   onload(): void {
+    this.registerObsidianProtocolHandler(AUTH_ACTION, params => { void this.auth.complete(params.state, params.vault); });
     this.registerObsidianProtocolHandler(ACTION, params => {
       const result = this.session.receive(params.state, params.vault, Date.now());
       this.record(`Synthetic callback: ${result}`);
@@ -30,6 +37,8 @@ export default class CalendarLab extends Plugin {
 
   onunload(): void {
     this.session.clear();
+    this.syntheticLinks = null;
+    this.auth.clear();
   }
 
   record(message: string): void {
@@ -66,10 +75,10 @@ export default class CalendarLab extends Plugin {
       `Plugin: ${this.manifest.version}; Obsidian: ${apiVersion}; platform: ${platform}`,
       `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
       "OS version: fill in manually. Calendar client/version: fill in manually.", "",
-      "This report contains only explicit probe outcomes from this plugin session. No OAuth or calendar writes were performed.", "",
+      "This report contains only explicit probe outcomes from this plugin session. OAuth occurs only when explicitly started. No calendar API writes are implemented.", "",
       ...this.outcomes.map(line => `- ${line}`), "",
       "Manual observations: record whether the external browser opened, which vault received the callback, and whether app restart/backgrounding behaved as expected.", "",
-      "Pending: actual Google login, credential storage, ETags, conflict recovery, cancellation, and notifications.", "",
+      "Untested outcomes must not be inferred from other passes. Persistent credential storage, ETags, conflict recovery, cancellation, and notifications remain pending.", "",
     ].join("\n");
     const file = await this.app.vault.create(reportPath, content);
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
@@ -82,7 +91,7 @@ class LabModal extends Modal {
   onOpen(): void {
     const root = this.contentEl;
     root.createEl("h2", { text: "Calendar Lab" });
-    root.createEl("p", { text: "Synthetic device probes only. No Google login, task changes, or calendar events. Results remain in memory until you export them." });
+    root.createEl("p", { text: "Device and optional Google authentication probes. No task changes or calendar events. Results and login credentials stay in memory; export results before restarting." });
     const status = root.createEl("p", { text: "Choose a probe." });
     const action = (name: string, run: () => void | Promise<void>) => {
       const button = root.createEl("button", { text: name });
@@ -95,6 +104,31 @@ class LabModal extends Modal {
         })();
       });
     };
+    root.createEl("h3", { text: "Google authentication lab" });
+    root.createEl("p", { text: "Use your own deployed Calendar Lab service. Enter its HTTPS address and separate lab access key (never your Google client secret). Credentials are sent to that service and kept only for this Obsidian session." });
+    const serviceUrl = root.createEl("input", { attr: { type: "url", placeholder: "https://morning-os-calendar-lab-auth.YOUR-SUBDOMAIN.workers.dev", "aria-label": "Auth service URL" } });
+    const serviceKey = root.createEl("input", { attr: { type: "password", autocomplete: "off", placeholder: "Lab access key", "aria-label": "Lab access key" } });
+    action("Use service for this session", () => { this.lab.auth.configure(serviceUrl.value, serviceKey.value); serviceKey.value = ""; });
+    const googleLinks = root.createDiv();
+    const showGoogleLink = () => {
+      googleLinks.empty();
+      const url = this.lab.auth.loginUrl;
+      if (url) {
+        googleLinks.createEl("a", { text: "Open Google consent in browser", href: url, attr: { target: "_blank", rel: "noopener noreferrer" } });
+        googleLinks.createEl("p", { text: "Use Safari/your external browser. After consent, tap Open Obsidian. If needed, return here and complete the pending login manually." });
+      }
+    };
+    action("Prepare Google login", async () => { await this.lab.auth.start(this.app.vault.getName()); showGoogleLink(); });
+    action("Complete pending login", async () => { await this.lab.auth.complete(undefined, undefined, true); showGoogleLink(); });
+    action("Test token refresh", () => this.lab.auth.refresh());
+    root.createEl("p", { text: "Revocation removes this Google app's authorization and can affect other test devices using the same Google account and OAuth client." });
+    action("Revoke Google authorization", () => this.lab.auth.revoke());
+    action("Forget local login and service key", () => {
+      this.lab.auth.clear(); serviceKey.value = ""; showGoogleLink();
+      this.lab.record("Local login forgotten. This does not revoke Google authorization; use Google Account connections if needed.");
+    });
+    showGoogleLink();
+    root.createEl("h3", { text: "Device and synthetic probes" });
     action("Test Web Crypto", () => this.lab.capabilities());
     root.createEl("p", { text: "The next probe makes one unauthenticated GET to Google's public identity configuration. It sends no vault content or credentials." });
     action("Test native HTTP", () => this.lab.http());
@@ -112,11 +146,10 @@ class LabModal extends Modal {
       this.lab.record("Non-secret device-local marker cleared.");
     });
     const links = root.createDiv();
-    action("Start synthetic callback session", () => {
-      const state = randomHex();
-      const vault = this.app.vault.getName();
-      this.lab.session.start(state, vault, Date.now());
+    const showSyntheticLinks = () => {
       links.empty();
+      if (!this.lab.syntheticLinks) return;
+      const { state, vault } = this.lab.syntheticLinks;
       links.createEl("p", { text: "Valid for 2 minutes. Copy a URI into the external browser to test handoff, or tap to test in-app routing. Try wrong state first, valid next, then valid again to test replay. Reopening this panel keeps a pending session; starting again replaces it. Never paste real OAuth codes here." });
       const addLink = (name: string, value: string, vaultName = vault) => {
         const uri = `obsidian://${ACTION}?vault=${encodeURIComponent(vaultName)}&state=${encodeURIComponent(value)}`;
@@ -128,8 +161,16 @@ class LabModal extends Modal {
       };
       addLink("Wrong-state callback", "synthetic-wrong-state");
       addLink("Valid callback (repeat to test replay)", state);
+    };
+    action("Start synthetic callback session", () => {
+      const state = randomHex();
+      const vault = this.app.vault.getName();
+      this.lab.session.start(state, vault, Date.now());
+      this.lab.syntheticLinks = { state, vault };
+      showSyntheticLinks();
       this.lab.record("Synthetic callback session started; expires after 2 minutes.");
     });
+    showSyntheticLinks();
     root.createEl("p", { text: "For cold-start testing: copy a valid URI, fully close Obsidian, then open the URI. Expected: no-session, because the probe intentionally retains no login session on disk. A timeout must report expired. Export before closing the app to preserve earlier outcomes." });
     action("Export sanitized results", () => this.lab.exportReport());
   }

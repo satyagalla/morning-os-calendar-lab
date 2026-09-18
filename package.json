@@ -1,16 +1,21 @@
 {
   "name": "morning-os-calendar-lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Isolated Obsidian desktop and mobile calendar feasibility probes",
   "license": "MIT",
   "scripts": {
     "build": "tsc --noEmit && node build.mjs",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs && node tests/auth.mjs && node tests/service.mjs",
+    "test:worker": "node tests/worker-runtime.mjs",
+    "service:check": "wrangler deploy --dry-run --config service/wrangler.jsonc --outdir .deploy",
+    "service:deploy": "wrangler deploy --config service/wrangler.jsonc"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
+    "miniflare": "5.20260917.0-alpha",
     "obsidian": "1.12.3",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "wrangler": "4.134.0"
   }
 }

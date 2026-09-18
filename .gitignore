@@ -3,3 +3,9 @@ main.js
 .test-build/
 *.log
 .env*
+.dev.vars*
+.wrangler/
+service/.dev.vars*
+service/.wrangler/
+service/.deploy/
+.deploy/
