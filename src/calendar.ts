@@ -313,8 +313,17 @@ export class CalendarProbe {
       const event = this.ownedEvent(j, response.data);
       const deleted = await this.request({ method: "DELETE", path, etag: String(event.etag) });
       if (deleted.status === 412) {
-        this.report(`Cancellation revision conflict: HTTP 412; attempt ${attempt}/3. ${attempt < 3 ? "Re-read and revalidate before retry." : "Stopping; intent retained."}`);
-        if (attempt === 3) throw new ProbeError("Cancellation conflict retry limit");
+        this.report(`Cancellation revision conflict: HTTP 412; attempt ${attempt}/3. ${attempt < 3 ? "Re-read and revalidate before retry." : "Trying conditional cancellation PATCH; intent retained."}`);
+        if (attempt === 3) {
+          const latest = await this.request({ method: "GET", path });
+          if (absent(latest)) { this.report("Cancellation recovery: PASS; event already absent/cancelled. Local cancellation intent retained."); return; }
+          if (latest.status !== 200) throw new ProbeError("Cancellation fallback read failed");
+          const owned = this.ownedEvent(j, latest.data);
+          const cancelled = await this.request({ method: "PATCH", path, etag: String(owned.etag), body: { status: "cancelled" } });
+          if (cancelled.status !== 200 || !absent(cancelled)) throw new ProbeError("Cancellation PATCH fallback unconfirmed after DELETE retry limit");
+          if (!absent(await this.request({ method: "GET", path }))) throw new ProbeError("Cancellation PATCH absence unconfirmed");
+          this.report("Cancellation PATCH fallback: PASS; conditional status cancellation and provider absence verified. DELETE remains unresolved; cross-device ordering unproven."); return;
+        }
         continue;
       }
       if (deleted.status !== 204 && deleted.status !== 404 && deleted.status !== 410) throw new ProbeError("Cancellation delete failed");

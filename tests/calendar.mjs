@@ -87,7 +87,7 @@ await check("provider deletion after successful observation never recreates even
 });
 await check("delete conflict preserves cancellation intent for a fresh retry", async () => {
   const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
-  f.intercept(async r => r.method === "DELETE" ? { status: 412, data: {} } : undefined);
+  f.intercept(async r => r.method === "DELETE" || r.body?.status === "cancelled" ? { status: 412, data: {} } : undefined);
   await p.cancelEvent(); assert.ok(f.event()); assert.ok(f.store.read().cancel);
   f.intercept(async () => undefined); await f.make().recoverEvent(); assert.equal(f.event(), null);
 });
@@ -237,7 +237,7 @@ await check("cancellation conflict re-reads a changed revision before retry", as
 await check("persistent cancellation conflicts stop after three guarded attempts", async () => {
   const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
   const oldId = f.store.read().event;
-  f.intercept(async r => r.method === "DELETE" ? { status: 412, data: {} } : undefined);
+  f.intercept(async r => r.method === "DELETE" || r.body?.status === "cancelled" ? { status: 412, data: {} } : undefined);
   assert.equal(await p.batch(), false);
   assert.equal(f.calls.filter(r => r.method === "DELETE").length, 3);
   assert.equal(f.store.read().event, oldId); assert.ok(f.store.read().cancel);
@@ -261,5 +261,34 @@ await check("batch recovers a previous event conflict then reaches notification"
   f.intercept(async r => { if (r.method === "DELETE" && once) { once = false; return { status: 412, data: {} }; } });
   assert.equal(await p.batch(), true);
   assert.equal(f.event().summary, "Morning OS Calendar Lab UPDATED notification");
+});
+await check("persistent DELETE conflict can recover through conditional cancellation PATCH", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  f.intercept(async r => r.method === "DELETE" ? { status: 412, data: {} } : undefined);
+  await p.cancelEvent();
+  const patch = f.calls.find(r => r.body?.status === "cancelled");
+  assert.ok(patch.etag); assert.equal(f.event().status, "cancelled");
+  assert.ok(f.log.at(-1).includes("PATCH fallback: PASS"));
+  assert.equal(await f.make().verifyCancellation(), true);
+});
+await check("lost cancellation PATCH reply recovers the tombstone without another write", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  f.intercept(async r => {
+    if (r.method === "DELETE") return { status: 412, data: {} };
+    if (r.body?.status === "cancelled") { f.setEvent({ id: f.store.read().event, status: "cancelled" }); throw new Error("lost reply"); }
+  });
+  await p.cancelEvent(); const before = f.calls.length;
+  await f.make().recoverEvent();
+  assert.ok(f.calls.slice(before).every(r => r.method === "GET"));
+  assert.ok(f.log.at(-1).includes("already absent")); assert.ok(f.store.read().cancel);
+});
+await check("cancellation PATCH must return the expected cancelled identity", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  f.intercept(async r => {
+    if (r.method === "DELETE") return { status: 412, data: {} };
+    if (r.body?.status === "cancelled") return { status: 200, data: { id: "other", status: "cancelled" } };
+  });
+  await p.cancelEvent(); assert.ok(f.store.read().cancel);
+  assert.ok(!f.log.at(-1).includes("PASS")); assert.equal(f.event().status, "confirmed");
 });
 console.log(`${passed} calendar checks passed (mocked Google; live provider behavior remains untested).`);
