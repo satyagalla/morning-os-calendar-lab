@@ -1,0 +1,16 @@
+{
+  "name": "morning-os-calendar-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Obsidian desktop and mobile calendar feasibility probes",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "test": "node tests/run.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "obsidian": "1.12.3",
+    "typescript": "5.9.3"
+  }
+}
