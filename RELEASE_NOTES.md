@@ -1,8 +1,7 @@
-Calendar Lab 0.3.1 adds saved-event timing and read-only diagnostics.
+Calendar Lab 0.3.2 adds Start fresh event test.
 
-- Saved calendar name, start/end and requested alert time remain available after restart.
-- Read-only inspection distinguishes active/cancelled events, HTTP 410 Gone, and other HTTP failures without modifying the journal or provider.
-- Recovery now reports HTTP 410 as Gone with an unverified cause rather than claiming cancellation. ETag tests explain when the saved cancellation fence blocks them.
-- Existing credentials and journals remain compatible. No Cloudflare update required.
+After the current event has a saved cancellation fence and the provider reports it absent/cancelled, this explicit action retains its identity, timing, and cancellation record and allocates a new event identity in the same calendar. It makes no provider writes. Active events, failed provider checks, and repeated preparation are blocked. Old journals and saved login remain compatible. No Cloudflare update needed.
 
-Validation: 46 mocked checks and browser build. Live cancellation cause and calendar ETags remain unverified. Update BRAT, restore saved login, select Show saved event timing and Inspect saved event (read only), then export results.
+Test order: Restore saved login; Start fresh event test; Create event and simulate lost reply; Recover event or pending cancellation; Test stale update and delete (ETags); Show saved event timing; export results. Observe the calendar alert with Obsidian closed before cancelling.
+
+Validation: 49 mocked checks and TypeScript/browser build. Provider ETags and notification delivery still require live device testing. Cross-device ordering remains unimplemented.

@@ -128,4 +128,26 @@ await check("inspection distinguishes cancelled status, Gone and other failures 
     assert.ok(f.log.at(-1).includes(`HTTP ${reply.status}`)); assert.ok(!f.log.join().includes("never-log"));
   }
 });
+await check("fresh test archives cancelled identity atomically and reuses calendar after restart", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent(); await p.cancelEvent();
+  const old = f.store.read(), before = f.calls.length; await p.freshEvent();
+  const next = f.store.read(); assert.notEqual(next.event, old.event); assert.equal(next.calendar, old.calendar);
+  assert.equal(next.retired[0].event, old.event); assert.equal(next.retired[0].cancel, true);
+  assert.equal(next.attempted, false); assert.equal(next.cancel, false); assert.ok(f.calls.slice(before).every(r => r.method === "GET"));
+  await f.make().createEvent(true); await f.make().recoverEvent(); assert.equal(f.event().id, next.event);
+  assert.equal(f.store.read().retired[0].event, old.event);
+});
+await check("fresh test blocks active event, auth failures and repeated preparation", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent(); await p.cancelEvent(true);
+  const saved = f.store.read(); await p.freshEvent(); assert.deepEqual(f.store.read(), saved);
+  f.intercept(async r => r.path.includes("/events/") ? { status: 403, data: {} } : undefined);
+  await p.freshEvent(); assert.deepEqual(f.store.read(), saved);
+  f.intercept(async () => undefined); await p.recoverEvent(); await p.freshEvent();
+  const fresh = f.store.read(); await p.freshEvent(); assert.deepEqual(f.store.read(), fresh);
+});
+await check("fresh test retains journal when archive storage fails", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent(); await p.cancelEvent();
+  const saved = f.store.read(); f.store.write = () => { throw new Error("full"); };
+  await p.freshEvent(); assert.deepEqual(f.store.read(), saved); assert.ok(!f.log.at(-1).includes("prepared: PASS"));
+});
 console.log(`${passed} calendar checks passed (mocked Google; live provider behavior remains untested).`);

@@ -159,6 +159,8 @@ class LabModal extends Modal {
     const details = root.createEl("p", { text: this.lab.calendar.details() });
     action("Show saved event timing", () => { const value = this.lab.calendar.details(); details.setText(value); this.lab.record(value); });
     action("Inspect saved event (read only)", () => this.lab.calendar.inspectEvent());
+    root.createEl("p", { text: "After cancellation is complete, Start fresh event test archives the old cancellation record and prepares a new identity in the same calendar. It does not create an event. Then choose one event creation button. Observe notifications before cancelling." });
+    action("Start fresh event test", async () => { await this.lab.calendar.freshEvent(); details.setText(this.lab.calendar.details()); });
     action("Test stale update and delete (ETags)", () => this.lab.calendar.staleWrites());
     root.createEl("p", { text: "Observe the alert before cancellation. For interrupted cancellation: save intent, export results, restart Obsidian, restore login, then recover. Cancellation remains recorded to prevent this lab from recreating the event." });
     action("Save cancellation intent without sending", () => this.lab.calendar.cancelEvent(true));

@@ -1,7 +1,8 @@
 // Deliberately bounded lab: one calendar, one event, explicit actions only.
 export type Reply = { status: number; data: unknown };
 export type CalendarRequest = { method: string; path: string; body?: Record<string, unknown>; etag?: string };
-type Journal = { version: 1; owner: string; calendar?: string; creating: boolean; event: string; start: string; end: string; attempted: boolean; observed: boolean; cancel: boolean };
+type Retired = { event: string; start: string; end: string; attempted: boolean; observed: boolean; cancel: true };
+type Journal = { version: 1; owner: string; calendar?: string; creating: boolean; event: string; start: string; end: string; attempted: boolean; observed: boolean; cancel: boolean; retired?: Retired[] };
 type Store = { read(): unknown; write(value: Journal): void };
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid record");
@@ -18,6 +19,24 @@ export class CalendarProbe {
   private stopped = false;
   constructor(private readonly transport: (request: CalendarRequest) => Promise<Reply>, private readonly store: Store, private readonly report: (message: string) => void) {}
   stop(): void { this.stopped = true; }
+  async freshEvent(): Promise<void> {
+    await this.run(async () => {
+      const j = await this.ownedCalendar();
+      if (!j.cancel || !j.attempted) { this.report("Fresh test blocked: finish cancellation of the current attempted event first. No changes made."); return; }
+      const response = await this.request({ method: "GET", path: `${this.path(j)}/${j.event}` });
+      const cancelled = response.status === 200 && record(response.data).id === j.event && record(response.data).status === "cancelled";
+      if (!cancelled && response.status !== 404 && response.status !== 410) {
+        this.report(`Fresh test blocked: old event not confirmed absent/cancelled (HTTP ${response.status}). Recover pending cancellation first. No changes made.`); return;
+      }
+      const retired = [...(j.retired ?? []), { event: j.event, start: j.start, end: j.end, attempted: j.attempted, observed: j.observed, cancel: true as const }];
+      if (retired.length > 100) throw new Error("History limit reached");
+      const next: Journal = { ...j, retired, event: "moslab" + hex(), start: timestamp(Date.now() + 600000), end: timestamp(Date.now() + 900000), attempted: false, observed: false, cancel: false };
+      // Archive and allocate the next identity in one journal write. No provider writes here.
+      this.save(next);
+      if (JSON.stringify(this.load()) !== JSON.stringify(next)) throw new Error("Journal readback failed");
+      this.report(`Fresh event test prepared: PASS; ${retired.length} cancelled event record(s) retained. Same dedicated calendar; new identity. Now create the notification event or simulate a lost reply.`);
+    });
+  }
   details(): string {
     const j = this.load();
     if (!j) return "No saved calendar test.";
@@ -49,6 +68,18 @@ export class CalendarProbe {
         typeof j.start !== "string" || !Number.isFinite(Date.parse(j.start)) ||
         typeof j.end !== "string" || !Number.isFinite(Date.parse(j.end)) ||
         (j.calendar !== undefined && (typeof j.calendar !== "string" || !j.calendar.endsWith("@group.calendar.google.com")))) throw new Error("Invalid journal");
+    if (j.retired !== undefined) {
+      if (!Array.isArray(j.retired) || j.retired.length > 100) throw new Error("Invalid retired records");
+      const seen = new Set<string>([String(j.event)]);
+      for (const raw of j.retired) {
+        const r = record(raw);
+        if (typeof r.event !== "string" || !/^moslab[a-f0-9]{32}$/.test(r.event) || seen.has(r.event) ||
+            r.cancel !== true || typeof r.attempted !== "boolean" || typeof r.observed !== "boolean" ||
+            typeof r.start !== "string" || !Number.isFinite(Date.parse(r.start)) ||
+            typeof r.end !== "string" || !Number.isFinite(Date.parse(r.end))) throw new Error("Invalid retired record");
+        seen.add(r.event);
+      }
+    }
     return j as Journal;
   }
   private save(j: Journal): void { this.store.write(j); }
