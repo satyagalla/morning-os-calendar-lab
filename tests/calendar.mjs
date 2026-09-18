@@ -110,4 +110,22 @@ await check("unload prevents follow-up requests from pending response", async ()
   const pending = p.staleWrites(); await Promise.resolve(); p.stop(); release({ status: 200, data: {} }); await pending;
   assert.equal(f.calls.filter(r => r.method === "PATCH").length, 0);
 });
+await check("saved timing is available offline; read-only inspection never changes journal", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  const saved = f.store.read(), before = f.calls.length;
+  assert.ok(p.details().includes(saved.start)); assert.ok(p.details().includes("requested alert"));
+  assert.equal(f.calls.length, before); await p.inspectEvent();
+  assert.deepEqual(f.store.read(), saved); assert.ok(f.calls.slice(before).every(r => r.method === "GET"));
+  assert.ok(f.log.at(-1).includes("active"));
+});
+await check("inspection distinguishes cancelled status, Gone and other failures without writes", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  for (const reply of [{ status: 410, data: {} }, { status: 403, data: { secret: "never-log" } },
+    { status: 200, data: { id: f.store.read().event, status: "cancelled" } }]) {
+    f.intercept(async r => r.path.includes("/events/") ? reply : undefined);
+    const saved = f.store.read(), before = f.calls.length; await p.inspectEvent();
+    assert.deepEqual(f.store.read(), saved); assert.ok(f.calls.slice(before).every(r => r.method === "GET"));
+    assert.ok(f.log.at(-1).includes(`HTTP ${reply.status}`)); assert.ok(!f.log.join().includes("never-log"));
+  }
+});
 console.log(`${passed} calendar checks passed (mocked Google; live provider behavior remains untested).`);

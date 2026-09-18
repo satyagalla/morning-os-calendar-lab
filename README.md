@@ -1,5 +1,7 @@
 # Morning OS Calendar Lab
 
+Latest beta: **0.3.1**. Adds **Show saved event timing** and **Inspect saved event (read only)** for existing journals. A 0.3.0 cancellation message could mean either HTTP 410 Gone or an explicitly cancelled event; use inspection to distinguish them. Existing saved login remains compatible; no Worker update is needed.
+
 An independent Obsidian plugin for testing the desktop/iPhone/Android capabilities needed by a future Morning OS calendar integration. Plugin ID: `morning-os-calendar-lab`. Minimum Obsidian version: 1.11.4 (SecretStorage). This lab-only change was approved by the user; Morning OS is unchanged.
 
 Version 0.3.0 adds opt-in saved login and explicit dedicated-calendar probes: insertion, simulated lost-reply recovery, stale PATCH/DELETE rejection, notification setup and durable local cancellation intent. It does not read Morning OS tasks. Follow [service setup](service/SETUP.md), [restart tests](test-kit/Credential%20Persistence.md), then [calendar tests](test-kit/Calendar%20Writes.md).

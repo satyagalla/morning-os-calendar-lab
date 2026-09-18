@@ -18,6 +18,27 @@ export class CalendarProbe {
   private stopped = false;
   constructor(private readonly transport: (request: CalendarRequest) => Promise<Reply>, private readonly store: Store, private readonly report: (message: string) => void) {}
   stop(): void { this.stopped = true; }
+  details(): string {
+    const j = this.load();
+    if (!j) return "No saved calendar test.";
+    return `Calendar: Morning OS Calendar Lab ${j.owner.slice(0, 8)}. Saved start: ${j.start}; end: ${j.end}; requested alert: ${timestamp(Date.parse(j.start) - 60000)}. Event attempted: ${j.attempted}; observed active: ${j.observed}; recreation blocked: ${j.cancel}. These are saved values, not a live provider check.`;
+  }
+  async inspectEvent(): Promise<void> {
+    await this.run(async () => {
+      this.report(this.details());
+      const j = await this.ownedCalendar();
+      if (!j.attempted) { this.report("Inspection: no event creation attempted."); return; }
+      const response = await this.request({ method: "GET", path: `${this.path(j)}/${j.event}` });
+      if (response.status === 200) {
+        const e = record(response.data);
+        if (e.id !== j.event) throw new Error("Unexpected event identity");
+        if (e.status === "cancelled") { this.report("Read-only inspection: HTTP 200; saved event has cancelled status. No writes made."); return; }
+        this.ownedEvent(j, e);
+        this.report("Read-only inspection: HTTP 200; saved owned event is active. No writes made."); return;
+      }
+      this.report(`Read-only inspection: HTTP ${response.status}; ${response.status === 410 ? "event endpoint returned Gone" : response.status === 404 ? "event not found or inaccessible" : "provider request unsuccessful"}. No writes made. This status alone does not identify who cancelled an event.`);
+    });
+  }
   private load(): Journal | null {
     const raw = this.store.read();
     if (raw === null || raw === undefined) return null;
@@ -119,7 +140,8 @@ export class CalendarProbe {
         if (response.status === 409) response = await this.request({ method: "GET", path: `${this.path(j)}/${j.event}` });
       }
       if (response.status === 410 || (response.status === 200 && record(response.data).status === "cancelled")) {
-        j.cancel = true; this.save(j); this.report("Provider cancellation observed; local resurrection blocked."); return;
+        j.cancel = true; this.save(j);
+        this.report(response.status === 410 ? "Event recovery: HTTP 410 Gone; recreation blocked as a precaution. Cause unverified." : "Event recovery: HTTP 200 with cancelled status; recreation blocked."); return;
       }
       if (response.status !== 200 && response.status !== 201) throw new Error("Recovery unconfirmed");
       this.ownedEvent(j, response.data); j.observed = true; this.save(j);
@@ -128,7 +150,7 @@ export class CalendarProbe {
   }
   async staleWrites(): Promise<void> {
     await this.run(async () => {
-      const j = await this.ownedCalendar(); if (j.cancel) throw new Error("Cancelled");
+      const j = await this.ownedCalendar(); if (j.cancel) { this.report("ETag test blocked: saved event is fenced against recreation. Inspect saved event first; no ETag requests sent."); return; }
       const path = `${this.path(j)}/${j.event}`;
       const initial = await this.request({ method: "GET", path }); if (initial.status !== 200) throw new Error("Missing event");
       const old = this.ownedEvent(j, initial.data), summary = `Morning OS Calendar Lab revision ${hex().slice(0, 8)}`;

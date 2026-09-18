@@ -25,3 +25,9 @@ User-reported session on the same Obsidian version/platform/timezone, 2026-09-18
 The extra refreshes followed requested panel reopening/background checks, but the report does not explicitly attribute each timestamp to a manual action. Do not infer cold-start persistence or background execution. No calendar calls occurred in this version.
 
 Not established: marker persistence, expiration boundary on-device, persistent credential storage, provider writes/ETags, cancellation recovery, or notifications. No Windows or Android results recorded here. Live OAuth succeeded with PKCE parameters; independent negative testing of Google's verifier enforcement remains separate.
+
+## Credential persistence: version 0.3.0
+
+User reported saving credentials at 09:05:55 and a successful restart/restore. Exported reports show refresh and credential restore PASS at 09:09:19 and 09:11:02 without browser login. This establishes the reported iPhone restart workflow, not cross-device isolation or encryption at rest.
+
+At 09:11:05 the calendar journal already existed; at 09:11:10 event creation had already been attempted. Recovery at 09:11:12 reported provider cancellation, followed by a generic failure at 09:11:19. Version 0.3.0 used that cancellation message for both HTTP 410 Gone and an explicit cancelled event response, so the precise provider result and cause remain unknown. The previous supplied report contains only credential restoration, with no calendar creation timestamp. ETags and notifications have not passed. Version 0.3.1 adds timing and read-only provider diagnostics.
