@@ -41,6 +41,15 @@ async function start(vault = "OS & test") {
 }
 const callback = (state, extra = "code=code-fixture") => worker.fetch(new Request(`${origin}/oauth/callback?state=${state}&${extra}`), env);
 try {
+  await check("synthetic header arrival diagnostic never forwards or reflects credentials", async () => {
+    for (const method of ["PATCH", "DELETE"]) {
+      const r = await worker.fetch(new Request(origin + "/probe/if-match", { method, headers: { "If-Match": '"moslab-header-probe"' } }), env);
+      assert.equal(r.status, 200); assert.deepEqual(await r.json(), { method, matched: true });
+      const absent = await worker.fetch(new Request(origin + "/probe/if-match", { method }), env);
+      assert.equal((await absent.json()).matched, false);
+    }
+    assert.equal(googleCalls, 0);
+  });
   await check("configuration and lab key fail closed", async () => {
     assert.equal((await worker.fetch(new Request(origin + "/start", { method: "POST" }), {})).status, 503);
     assert.equal((await post("/start", {}, "wrong")).status, 401);

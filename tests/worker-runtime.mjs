@@ -25,6 +25,10 @@ const mf = new Miniflare(convertV4MiniflareOptions({
 const post = (path, body) => mf.dispatchFetch(origin + path, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body) });
 try {
   const health = await mf.dispatchFetch(origin + "/health"); assert.equal((await health.json()).configured, true);
+  for (const method of ["PATCH", "DELETE"]) {
+    const r = await mf.dispatchFetch(origin + "/probe/if-match", { method, headers: { "If-Match": '"moslab-header-probe"' } });
+    assert.deepEqual(await r.json(), { method, matched: true });
+  }
   const start = await post("/start", { challenge: await challenge(verifier), vault: "OS" }); assert.equal(start.status, 200);
   const { state } = await start.json();
   const callback = await mf.dispatchFetch(`${origin}/oauth/callback?state=${state}&code=fixture-code`); assert.equal(callback.status, 200);

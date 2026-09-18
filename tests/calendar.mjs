@@ -151,4 +151,49 @@ await check("fresh test retains journal when archive storage fails", async () =>
   const saved = f.store.read(); f.store.write = () => { throw new Error("full"); };
   await p.freshEvent(); assert.deepEqual(f.store.read(), saved); assert.ok(!f.log.at(-1).includes("prepared: PASS"));
 });
+await check("batch tests conflicts on sacrificial identity and preserves updated notification", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar();
+  assert.equal(await p.batch(), true);
+  assert.equal(f.store.read().retired.length, 1);
+  assert.equal(f.store.read().cancel, false);
+  assert.equal(f.event().summary, "Morning OS Calendar Lab UPDATED notification");
+  assert.ok(f.log.some(s => s.includes("stale DELETE: PASS")));
+  assert.ok(f.log.some(s => s.includes("duplicate identity: PASS")));
+  assert.equal(f.calls.filter(r => r.method === "POST" && r.path.endsWith("/events")).length, 3);
+});
+await check("batch records ignored stale DELETE without destroying notification identity", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar();
+  let ignored = false;
+  f.intercept(async r => {
+    if (r.method === "DELETE" && r.etag !== f.event()?.etag && !ignored) {
+      ignored = true; f.setEvent(null); return { status: 204, data: null };
+    }
+  });
+  assert.equal(await p.batch(), true);
+  assert.ok(f.log.some(s => s.includes("stale DELETE: FAIL")));
+  assert.ok(f.event()); assert.notEqual(f.event().id, f.store.read().retired[0].event);
+  await p.cancelEvent(true); await f.make().recoverEvent(); assert.equal(f.event(), null);
+});
+await check("batch unknown insert stops and leaves original ID recoverable", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar();
+  f.intercept(async r => { if (r.method === "POST" && r.path.endsWith("/events")) throw new Error("offline"); });
+  assert.equal(await p.batch(), false); const id = f.store.read().event;
+  assert.ok(f.store.read().attempted); assert.equal(f.calls.filter(r => r.method === "PATCH").length, 0);
+  f.intercept(async () => undefined); await p.recoverEvent(); assert.equal(f.event().id, id);
+});
+await check("batch reschedule failure retains attempted notification for recovery", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar();
+  f.intercept(async r => r.method === "PATCH" && r.body?.start ? { status: 503, data: {} } : undefined);
+  assert.equal(await p.batch(), false); assert.ok(f.event()); assert.ok(f.store.read().attempted);
+  assert.ok(!f.log.some(s => s.includes("Batch reschedule: PASS")));
+});
+await check("restart completion requires saved cancellation and verified provider absence", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  assert.equal(await p.verifyCancellation(), false);
+  await p.cancelEvent(true); assert.equal(p.cancellationSaved(), true);
+  assert.equal(await f.make().verifyCancellation(), false);
+  await f.make().recoverEvent(); assert.equal(await f.make().verifyCancellation(), true);
+  f.intercept(async r => r.path.includes("/events/") ? { status: 403, data: {} } : undefined);
+  assert.equal(await f.make().verifyCancellation(), false);
+});
 console.log(`${passed} calendar checks passed (mocked Google; live provider behavior remains untested).`);

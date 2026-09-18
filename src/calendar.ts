@@ -19,6 +19,91 @@ export class CalendarProbe {
   private stopped = false;
   constructor(private readonly transport: (request: CalendarRequest) => Promise<Reply>, private readonly store: Store, private readonly report: (message: string) => void) {}
   stop(): void { this.stopped = true; }
+  cancellationSaved(): boolean { return this.load()?.cancel === true; }
+  async verifyCancellation(): Promise<boolean> {
+    let confirmed = false;
+    await this.run(async () => {
+      const j = await this.ownedCalendar();
+      if (!j.cancel || !j.attempted) throw new Error("No cancellation checkpoint");
+      const r = await this.request({ method: "GET", path: `${this.path(j)}/${j.event}` });
+      confirmed = r.status === 404 || r.status === 410 || (r.status === 200 && record(r.data).id === j.event && record(r.data).status === "cancelled");
+    });
+    return confirmed;
+  }
+  async batch(): Promise<boolean> {
+    let completed = false;
+    await this.run(async () => {
+      let j = await this.ownedCalendar();
+      const absent = (r: Reply, id: string) => r.status === 404 || r.status === 410 ||
+        (r.status === 200 && record(r.data).id === id && record(r.data).status === "cancelled");
+      const allocate = () => {
+        const retired = j.attempted ? [...(j.retired ?? []), { event: j.event, start: j.start, end: j.end, attempted: j.attempted, observed: j.observed, cancel: true as const }] : j.retired;
+        if ((retired?.length ?? 0) > 100) throw new Error("History limit");
+        j = { ...j, retired, event: "moslab" + hex(), attempted: false, observed: false, cancel: false,
+          start: timestamp(Date.now() + 600000), end: timestamp(Date.now() + 900000) };
+        this.save(j);
+        if (this.load()?.event !== j.event) throw new Error("Storage readback");
+      };
+      const get = () => this.request({ method: "GET", path: `${this.path(j)}/${j.event}` });
+      const finish = async () => {
+        j.cancel = true; this.save(j);
+        const r = await get();
+        if (!absent(r, j.event)) {
+          if (r.status !== 200) throw new Error("Read failed");
+          const e = this.ownedEvent(j, r.data);
+          const d = await this.request({ method: "DELETE", path: `${this.path(j)}/${j.event}`, etag: String(e.etag) });
+          if (d.status !== 204) throw new Error("Delete failed");
+        }
+        if (!absent(await get(), j.event)) throw new Error("Cancellation unconfirmed");
+      };
+      if (j.attempted) { await finish(); allocate(); }
+      // This event is sacrificial; a broken DELETE precondition cannot remove the notification event.
+      j.attempted = true; this.save(j);
+      await this.request({ method: "POST", path: this.path(j), body: this.body(j) });
+      const recovered = await get();
+      if (recovered.status !== 200) throw new Error("Insert recovery failed");
+      const a = this.ownedEvent(j, recovered.data); j.observed = true; this.save(j);
+      this.report("Batch lost insert reply: PASS; response discarded, original identity recovered. Simulation only.");
+      const duplicate = await this.request({ method: "POST", path: this.path(j), body: this.body(j) });
+      if (duplicate.status !== 409) throw new Error("Duplicate identity not rejected");
+      this.report("Batch duplicate identity: PASS; second insert rejected with 409.");
+      const path = `${this.path(j)}/${j.event}`;
+      const summary = "Morning OS Calendar Lab batch newer revision";
+      const updated = await this.request({ method: "PATCH", path, etag: String(a.etag), body: { summary } });
+      if (updated.status !== 200 || this.ownedEvent(j, updated.data).etag === a.etag) throw new Error("Update failed");
+      const stale = await this.request({ method: "PATCH", path, etag: String(a.etag), body: { summary: "STALE" } });
+      if (stale.status !== 412) throw new Error("Stale PATCH accepted");
+      const newest = await get();
+      if (newest.status !== 200 || this.ownedEvent(j, newest.data).summary !== summary) throw new Error("Newest revision lost");
+      this.report("Batch sequential stale PATCH: PASS; 412 and newest revision preserved. Not a two-device ordering test.");
+      j.cancel = true; this.save(j);
+      const staleDelete = await this.request({ method: "DELETE", path, etag: String(a.etag) });
+      this.report(`Batch sacrificial stale DELETE: ${staleDelete.status === 412 ? "PASS" : "FAIL"}; expected 412, got ${staleDelete.status}. Header echo is a separate transport diagnostic.`);
+      if (staleDelete.status !== 412 && staleDelete.status !== 204) throw new Error("Unexpected DELETE outcome");
+      if (staleDelete.status === 412) {
+        const preserved = await get();
+        if (preserved.status !== 200 || this.ownedEvent(j, preserved.data).summary !== summary) throw new Error("Delete preservation failed");
+      }
+      await finish();
+      this.report("Batch cancellation and absence recovery: PASS; tombstone retained. Restart recovery checkpoint still required.");
+      allocate(); j.attempted = true; this.save(j);
+      const inserted = await this.request({ method: "POST", path: this.path(j), body: this.body(j) });
+      if (inserted.status !== 200 && inserted.status !== 201) throw new Error("Notification insert failed");
+      const notification = this.ownedEvent(j, inserted.data);
+      // Move the original alert away, leaving only the updated alert to observe.
+      const oldAlert = timestamp(Date.parse(j.start) - 60000);
+      const start = timestamp(Date.now() + 180000), end = timestamp(Date.now() + 480000);
+      const moved = await this.request({ method: "PATCH", path: `${this.path(j)}/${j.event}`, etag: String(notification.etag),
+        body: { summary: "Morning OS Calendar Lab UPDATED notification", start: { dateTime: start }, end: { dateTime: end } } });
+      if (moved.status !== 200) throw new Error("Reschedule failed");
+      const e = this.ownedEvent(j, moved.data);
+      if (record(e.start).dateTime !== start && Date.parse(String(record(e.start).dateTime)) !== Date.parse(start)) throw new Error("Incorrect schedule");
+      j.start = start; j.end = end; j.observed = true; this.save(j);
+      this.report(`Batch reschedule: PASS; updated alert ${timestamp(Date.parse(start) - 60000)}; superseded alert ${oldAlert} must not fire. Observe on iPhone and PC.`);
+      this.report(this.details()); completed = true;
+    });
+    return completed;
+  }
   async freshEvent(): Promise<void> {
     await this.run(async () => {
       const j = await this.ownedCalendar();
@@ -214,6 +299,6 @@ export class CalendarProbe {
     if (deleted.status !== 204) { this.report(`Cancellation unconfirmed (HTTP ${deleted.status}); intent retained. Retry Recover event.`); return; }
     const check = await this.request({ method: "GET", path });
     if (check.status !== 404 && check.status !== 410 && !(check.status === 200 && record(check.data).status === "cancelled")) throw new Error("Deletion not confirmed");
-    this.report("Cancellation: PASS; conditional deletion verified. Local intent prevents this lab from recreating the event; cross-device ordering remains unproven.");
+    this.report("Cancellation: PASS; deletion and provider absence verified. DELETE precondition safety and cross-device ordering remain unproven.");
   }
 }

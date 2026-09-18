@@ -1,3 +1,5 @@
+Current release: **0.4.0**. Use the single guided workflow in [Complete Test Run](Complete%20Test%20Run.md). Run once, observe alerts, restart once, resume and export persistent results. Historical per-button instructions below are superseded by this workflow.
+
 # Dedicated calendar probes
 
 **0.3.3 correction:** the ETag button now tests PATCH only and sends no DELETE. Live 0.3.2 stale DELETE returned 204, destroying the test event rather than rejecting the stale ETag. PATCH passed in that run; conditional DELETE remains blocked for production until transport/provider behavior is isolated. For the cancelled 0.3.2 event: restore login, Recover event to record its fence, Start fresh event test, then create/recover a new notification event. Do not run the older destructive ETag button. Earlier DELETE expectations below describe the original test, not a validated result.

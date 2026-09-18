@@ -1,3 +1,5 @@
+Current release: **0.4.0**. Use the single guided workflow in [Complete Test Run](test-kit/Complete%20Test%20Run.md) (from test-kit, open Complete Test Run.md). Run once, observe alerts, restart once, resume and export persistent results. Historical per-button instructions below are superseded by this workflow.
+
 # Morning OS Calendar Lab
 
 Latest beta: **0.3.3** disables stale DELETE in the combined ETag probe after a live iOS request unexpectedly returned 204. Use **Test stale update (PATCH ETags only)** for a fresh notification event. Conditional DELETE is unverified and must not be relied on for production safety. Explicit cancellation remains a destructive lab action. Earlier version descriptions below document historical behavior.

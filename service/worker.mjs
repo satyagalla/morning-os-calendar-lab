@@ -75,9 +75,13 @@ export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
-      if (url.pathname === "/health" && request.method === "GET") return json({ service: "morning-os-calendar-lab", version: "0.2.0", configured: configured(env) });
+      if (url.pathname === "/health" && request.method === "GET") return json({ service: "morning-os-calendar-lab", version: "0.4.0", configured: configured(env) });
       if (!configured(env)) return fail(503, "configure_service");
       if (url.origin !== env.PUBLIC_ORIGIN) return fail(400, "wrong_origin");
+      // Public, fixed synthetic header diagnostic. No credentials, echoes, or forwarding.
+      if (url.pathname === "/probe/if-match" && ["PATCH", "DELETE"].includes(request.method)) {
+        return json({ method: request.method, matched: request.headers.get("if-match") === '"moslab-header-probe"' });
+      }
       if (url.pathname === CALLBACK && request.method === "GET") {
         const state = url.searchParams.get("state");
         if (!state || !HEX.test(state) || url.searchParams.getAll("state").length !== 1) return fail(400, "invalid_callback");

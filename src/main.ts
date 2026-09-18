@@ -9,6 +9,16 @@ const REPORT_ROOT = "Tests/Morning OS Calendar";
 const PUBLIC_URL = "https://accounts.google.com/.well-known/openid-configuration";
 const CALENDAR_JOURNAL = "morning-os-calendar-lab:calendar-journal-v1";
 const CREDENTIAL_KEY = "morning-os-calendar-lab-login-v1";
+const BATCH_KEY = "morning-os-calendar-lab:batch-v1";
+const RESULTS_KEY = "morning-os-calendar-lab:results-v1";
+const CHECKPOINTS = [
+  "Updated notification received on iPhone and PC",
+  "Superseded alert did not fire at its original time",
+  "Real two-device edit ordering and offline cancellation resurrection",
+  "Real connection loss or app termination during create/update/delete",
+  "Rate limits, temporary provider errors and expired-token retry",
+  "Midnight, timezone changes and daylight-saving transitions",
+];
 
 function randomHex(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -23,6 +33,8 @@ function localTimestamp(): string {
 export default class CalendarLab extends Plugin {
   readonly session = new ProbeSession();
   readonly outcomes: string[] = [];
+  readonly boot = randomHex();
+  batchBusy = false;
   syntheticLinks: { state: string; vault: string } | null = null;
   readonly auth = new AuthProbe(async (url, key, body) => {
     const response = await requestUrl({ url, method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body), throw: false });
@@ -45,6 +57,8 @@ export default class CalendarLab extends Plugin {
   }, message => this.record(message));
 
   onload(): void {
+    const saved: unknown = this.app.loadLocalStorage(RESULTS_KEY);
+    if (Array.isArray(saved) && saved.every(line => typeof line === "string" && line.length <= 2000)) this.outcomes.push(...saved.slice(-100));
     this.registerObsidianProtocolHandler(AUTH_ACTION, params => { void this.auth.complete(params.state, params.vault); });
     this.registerObsidianProtocolHandler(ACTION, params => {
       const result = this.session.receive(params.state, params.vault, Date.now());
@@ -63,7 +77,59 @@ export default class CalendarLab extends Plugin {
   record(message: string): void {
     this.outcomes.push(`${localTimestamp()} — ${message}`);
     if (this.outcomes.length > 100) this.outcomes.shift();
+    this.app.saveLocalStorage(RESULTS_KEY, this.outcomes);
     new Notice(`Calendar Lab: ${message}`);
+  }
+
+  async runBatch(): Promise<void> {
+    if (this.batchBusy) return;
+    this.batchBusy = true;
+    try {
+      if (!this.auth.connected) await this.auth.restoreLogin();
+      await this.auth.accessToken();
+      const pending: unknown = this.app.loadLocalStorage(BATCH_KEY);
+      if (pending && typeof pending === "object" && "stage" in pending && pending.stage === "restart") {
+        this.record("Batch start blocked: resume pending restart cancellation before starting again."); return;
+      }
+      await this.capabilities(); await this.http(); await this.auth.refresh(); await this.auth.accessToken();
+      for (const method of ["PATCH", "DELETE"]) {
+        const r = await requestUrl({ url: this.auth.serviceOrigin + "/probe/if-match", method,
+          headers: { "If-Match": '"moslab-header-probe"' }, throw: false });
+        const data: unknown = r.text ? JSON.parse(r.text) : null;
+        const ok = r.status === 200 && data !== null && typeof data === "object" && "matched" in data && data.matched === true;
+        this.record(`Batch ${method} If-Match header arrival: ${ok ? "PASS" : "FAIL or unavailable"}; HTTP ${r.status}. Fixed synthetic header only; no credentials sent. Does not prove Google's header handling.`);
+      }
+      if (this.calendar.details() === "No saved calendar test.") await this.calendar.createCalendar();
+      if (!await this.calendar.batch()) { this.record("Batch stopped: recover the retained journal before retrying. No completion claimed."); return; }
+      this.auth.saveLogin();
+      CHECKPOINTS.forEach((_, index) => this.app.saveLocalStorage(`morning-os-calendar-lab:checkpoint-${index}`, "PENDING"));
+      this.app.saveLocalStorage(BATCH_KEY, { stage: "observe", boot: this.boot });
+      this.record("Batch automated phase finished. Observe updated alert in about two minutes; record checkpoints below. Then save cancellation checkpoint, fully restart Obsidian and Resume batch. Stale DELETE failure is retained even when other tests pass.");
+    } finally { this.batchBusy = false; }
+  }
+
+  async saveBatchCancellation(): Promise<void> {
+    const state: unknown = this.app.loadLocalStorage(BATCH_KEY);
+    if (!state || typeof state !== "object" || !("stage" in state) || state.stage !== "observe") throw new Error("Run batch first");
+    await this.calendar.cancelEvent(true);
+    if (!this.calendar.cancellationSaved()) throw new Error("Cancellation was not saved");
+    this.app.saveLocalStorage(BATCH_KEY, { stage: "restart", boot: this.boot });
+    this.record("Batch checkpoint saved. Fully restart Obsidian, open this panel, then Resume batch after restart. Results persist automatically.");
+  }
+
+  async resumeBatch(): Promise<void> {
+    const state: unknown = this.app.loadLocalStorage(BATCH_KEY);
+    if (!state || typeof state !== "object" || !("stage" in state) || state.stage !== "restart" || !("boot" in state)) throw new Error("No restart checkpoint");
+    if (state.boot === this.boot) { this.record("Resume blocked: restart or plugin reload required. App process termination must be observed manually."); return; }
+    if (!this.auth.connected) await this.auth.restoreLogin();
+    await this.auth.accessToken();
+    await this.calendar.recoverEvent();
+    await this.calendar.inspectEvent();
+    if (await this.calendar.verifyCancellation()) {
+      this.app.saveLocalStorage(BATCH_KEY, { stage: "finished", boot: this.boot });
+      this.record("Batch restart cancellation recovery: PASS; saved intent survived plugin restart, recovery confirmed provider absence, local recreation fence retained. Full app termination is a manual observation; multi-device safety remains unproven.");
+    } else this.record("Batch restart cancellation recovery: FAIL or unknown; checkpoint retained for retry.");
+    await this.exportReport();
   }
 
   async capabilities(): Promise<void> {
@@ -94,13 +160,19 @@ export default class CalendarLab extends Plugin {
       `Plugin: ${this.manifest.version}; Obsidian: ${apiVersion}; platform: ${platform}`,
       `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
       "OS version: fill in manually. Calendar client/version: fill in manually.", "",
-      "This report contains only explicit probe outcomes from this plugin session. Calendar writes occur only through explicit lab actions on a dedicated test calendar.", "",
+      "Results persist across lab sessions and restarts. Calendar writes occur only through explicit lab actions on a dedicated test calendar.", "",
       ...this.outcomes.map(line => `- ${line}`), "",
+      "Remaining manual/integration checkpoints (unrecorded means PENDING):", "",
+      ...CHECKPOINTS.map((label, index) => `- ${label}: ${this.checkpoint(index)}`), "",
       "Manual observations: record whether the external browser opened, which vault received the callback, and whether app restart/backgrounding behaved as expected.", "",
       "Untested outcomes must not be inferred from other passes. Simulated lost replies and stale requests do not establish multi-device ordering. Notification delivery requires manual observation.", "",
     ].join("\n");
     const file = await this.app.vault.create(reportPath, content);
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+  }
+  checkpoint(index: number): string {
+    const value: unknown = this.app.loadLocalStorage(`morning-os-calendar-lab:checkpoint-${index}`);
+    return value === "PASS" || value === "FAIL" ? value : "PENDING";
   }
 }
 
@@ -115,6 +187,7 @@ class LabModal extends Modal {
     const action = (name: string, run: () => void | Promise<void>) => {
       const button = root.createEl("button", { text: name });
       button.addEventListener("click", () => {
+        if (this.lab.batchBusy) { status.setText("Batch running; wait for it to finish."); return; }
         button.disabled = true;
         void (async () => {
           try { await run(); status.setText(`${name}: finished. See the notice or export results.`); }
@@ -123,6 +196,21 @@ class LabModal extends Modal {
         })();
       });
     };
+    root.createEl("h3", { text: "Complete test run — 0.4.0" });
+    root.createEl("p", { text: "Restore saved login or log in below, then run once. This explicitly deletes previous disposable lab events, tests recovery/conflicts/DELETE on a sacrificial event, and leaves an updated notification due in about two minutes. Results survive restart. Two-device ordering, real outages, rate limits and time transitions require separate actual observations; they are included as pending checkpoints, not simulated passes." });
+    action("Run complete test batch", () => this.lab.runBatch());
+    action("Save cancellation checkpoint (after observing alerts)", () => this.lab.saveBatchCancellation());
+    action("Resume batch after restart and export", () => this.lab.resumeBatch());
+    CHECKPOINTS.forEach((label, index) => {
+      root.createEl("p", { text: label });
+      const select = root.createEl("select", { attr: { "aria-label": label } });
+      for (const value of ["PENDING", "PASS", "FAIL"]) select.createEl("option", { text: value, value });
+      select.value = this.lab.checkpoint(index);
+      select.addEventListener("change", () => {
+        this.app.saveLocalStorage(`morning-os-calendar-lab:checkpoint-${index}`, select.value);
+        this.lab.record(`Manual checkpoint: ${label}: ${select.value}. User observation, not an automated probe.`);
+      });
+    });
     root.createEl("h3", { text: "Google authentication lab" });
     root.createEl("p", { text: "Use your deployed Calendar Lab service. Enter its HTTPS address and lab access key (never your Google client secret). Credentials stay in memory unless you save login below. To restore an existing saved login, skip configuration and use Restore saved login." });
     const serviceUrl = root.createEl("input", { attr: { type: "url", placeholder: "https://morning-os-calendar-lab-auth.YOUR-SUBDOMAIN.workers.dev", "aria-label": "Auth service URL" } });

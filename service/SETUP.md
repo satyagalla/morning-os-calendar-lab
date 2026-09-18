@@ -1,3 +1,5 @@
+Current service 0.4.0 adds a public fixed synthetic /probe/if-match PATCH/DELETE diagnostic; no credentials or calendar forwarding. Redeploy for the 0.4.0 batch. Existing four secrets are preserved. Historical OAuth setup below remains applicable.
+
 # Google authentication lab setup
 
 This service never calls the Calendar API; plugin 0.3.0 calls it directly through explicit probes. Scope remains `calendar.app.created`. User-reported iPhone login/refresh/revocation passed in 0.2.0. The Worker stays at 0.2.0; no redeployment is needed for plugin 0.3.0.
@@ -48,7 +50,7 @@ node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('h
 
 Paste it into `LAB_KEY` and save it in your password manager for entering on the phone. This is separate from the Google secret and restricts access to the private test service. This lab is not a public multi-user service; production needs per-install authorization, abuse controls and a reviewed credential lifecycle.
 
-Save/deploy settings. Open `<PUBLIC_ORIGIN>/health`; expect version `0.2.0` and `configured: true`. This checks configuration shape, not whether Google accepts the credentials.
+Save/deploy settings. Open `<PUBLIC_ORIGIN>/health`; expect version `0.4.0` and `configured: true`. This checks configuration shape, not whether Google accepts the credentials.
 
 ## 4. Update and test the iPhone plugin
 

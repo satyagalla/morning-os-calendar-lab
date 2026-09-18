@@ -25,6 +25,7 @@ export class AuthProbe {
   constructor(private readonly transport: Transport, private readonly report: (message: string) => void, private readonly storage?: CredentialStore) {}
   get loginUrl(): string | undefined { return this.pending?.url; }
   get connected(): boolean { return this.tokens !== null; }
+  get serviceOrigin(): string { return this.origin; }
   async accessToken(): Promise<string> {
     if (this.busy) throw new Error("Auth operation in progress");
     if (this.tokens && this.tokens.expires <= Date.now() + 60000) await this.refresh();

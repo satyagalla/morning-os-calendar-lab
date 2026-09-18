@@ -1,5 +1,7 @@
-Calendar Lab 0.3.3 removes stale DELETE from the combined ETag probe after live iOS testing returned 204 rather than the expected 412. PATCH-only testing verifies stale update rejection while preserving the notification event. Conditional DELETE remains unsafe/unverified; this release does not fix or claim to fix the transport/provider discrepancy. Explicit cancellation still deletes the disposable test event.
+Calendar Lab 0.4.0 adds one guided test batch, persistent results across restart, a sacrificial stale DELETE diagnostic, duplicate-ID and lost-reply recovery probes, rescheduling verification, and one restart cancellation checkpoint. A separate final event produces the updated notification in about two minutes. Includes all remaining acceptance checkpoints and identifies unimplemented multi-device ordering, update recovery and retry policy explicitly; these are not automated passes.
 
-Resume: restore login; inspect/recover the previous event to record its cancellation; Start fresh event test; Create event and simulate lost reply; Recover event; Test stale update (PATCH ETags only); Show saved event timing; export. Observe notifications before explicit cancellation.
+The Worker is updated to 0.4.0 with a fixed synthetic PATCH/DELETE If-Match arrival diagnostic. It receives no Google token or lab key and provides no calendar proxy. Existing OAuth credentials and journals remain compatible. Refresh/login/revocation behavior is unchanged. Production calendar integration remains blocked on ordering and DELETE safety.
 
-Validation: 49 mocked checks and browser build. Existing Worker, credentials and journals remain compatible. No service update needed. Production publishing remains blocked.
+Update BRAT; open the panel; Run complete test batch; observe the updated and superseded alert times; save cancellation checkpoint; restart once; Resume batch after restart and export. See test-kit/Complete Test Run.md.
+
+Validation: 55 mocked checks, browser build, Workers runtime, and Worker deployment dry-run.
