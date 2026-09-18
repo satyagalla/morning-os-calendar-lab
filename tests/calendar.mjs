@@ -196,4 +196,31 @@ await check("restart completion requires saved cancellation and verified provide
   f.intercept(async r => r.path.includes("/events/") ? { status: 403, data: {} } : undefined);
   assert.equal(await f.make().verifyCancellation(), false);
 });
+await check("batch reports failed cleanup phase and HTTP status without provider secrets", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  f.intercept(async r => r.path.includes("/events/") && r.method === "GET" ? { status: 403, data: { error: "private-provider-value" } } : undefined);
+  assert.equal(await p.batch(), false);
+  assert.ok(f.log.at(-1).includes("recover previous event cancellation"));
+  assert.ok(f.log.at(-1).includes("GET event: HTTP 403"));
+  assert.ok(f.log.at(-1).includes("Read failed"));
+  assert.ok(!f.log.join().includes("private-provider-value"));
+  assert.equal(f.calls.filter(r => r.method === "DELETE").length, 0);
+});
+await check("transport exception details are never included in diagnostic reports", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar();
+  f.intercept(async () => { throw new Error("Bearer secret-provider-value"); });
+  assert.equal(await p.batch(), false);
+  assert.ok(f.log.at(-1).includes("verify dedicated calendar"));
+  assert.ok(f.log.at(-1).includes("no HTTP response received"));
+  assert.ok(!f.log.join().includes("secret-provider-value"));
+});
+await check("unattempted old journal receives a fresh current batch schedule", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar();
+  const old = f.store.read();
+  f.store.write({ ...old, start: "2020-01-01T10:00:00-05:00", end: "2020-01-01T10:05:00-05:00" });
+  assert.equal(await p.batch(), true);
+  const first = f.calls.find(r => r.method === "POST" && r.path.endsWith("/events"));
+  assert.ok(Date.parse(first.body.start.dateTime) > Date.now());
+  assert.notEqual(first.body.id, old.event);
+});
 console.log(`${passed} calendar checks passed (mocked Google; live provider behavior remains untested).`);

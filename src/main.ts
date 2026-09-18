@@ -50,7 +50,9 @@ export default class CalendarLab extends Plugin {
     if (etag) headers["If-Match"] = etag;
     const response = await requestUrl({ url: "https://www.googleapis.com/calendar/v3" + path, method, headers,
       ...(body ? { body: JSON.stringify(body) } : {}), throw: false });
-    return { status: response.status, data: response.text ? JSON.parse(response.text) as unknown : null };
+    let data: unknown = null;
+    try { data = response.text.trim() ? JSON.parse(response.text) as unknown : null; } catch { /* Preserve HTTP status without exposing a non-JSON provider body. */ }
+    return { status: response.status, data };
   }, {
     read: () => this.app.loadLocalStorage(CALENDAR_JOURNAL) as unknown,
     write: value => this.app.saveLocalStorage(CALENDAR_JOURNAL, value),
@@ -100,7 +102,7 @@ export default class CalendarLab extends Plugin {
         this.record(`Batch ${method} If-Match header arrival: ${ok ? "PASS" : "FAIL or unavailable"}; HTTP ${r.status}. Fixed synthetic header only; no credentials sent. Does not prove Google's header handling.`);
       }
       if (this.calendar.details() === "No saved calendar test.") await this.calendar.createCalendar();
-      if (!await this.calendar.batch()) { this.record("Batch stopped: recover the retained journal before retrying. No completion claimed."); return; }
+      if (!await this.calendar.batch()) { this.record("Batch stopped before completion. Export sanitized results for the phase and HTTP status; journal retained."); await this.exportReport(); return; }
       this.auth.saveLogin();
       CHECKPOINTS.forEach((_, index) => this.app.saveLocalStorage(`morning-os-calendar-lab:checkpoint-${index}`, "PENDING"));
       this.app.saveLocalStorage(BATCH_KEY, { stage: "observe", boot: this.boot });

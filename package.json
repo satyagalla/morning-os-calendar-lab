@@ -1,6 +1,6 @@
 {
   "name": "morning-os-calendar-lab",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Isolated Obsidian desktop and mobile calendar feasibility probes",
   "license": "MIT",

@@ -1,7 +1,7 @@
-Calendar Lab 0.4.0 adds one guided test batch, persistent results across restart, a sacrificial stale DELETE diagnostic, duplicate-ID and lost-reply recovery probes, rescheduling verification, and one restart cancellation checkpoint. A separate final event produces the updated notification in about two minutes. Includes all remaining acceptance checkpoints and identifies unimplemented multi-device ordering, update recovery and retry policy explicitly; these are not automated passes.
+Calendar Lab 0.4.1 fixes diagnostic reporting for batches that stop before creating the notification event. Reports now identify the batch phase, request method, endpoint category, HTTP status (if received), and a bounded local validation failure. Raw provider responses, exception messages, URLs and credentials are omitted. Failed batches automatically export the report.
 
-The Worker is updated to 0.4.0 with a fixed synthetic PATCH/DELETE If-Match arrival diagnostic. It receives no Google token or lab key and provides no calendar proxy. Existing OAuth credentials and journals remain compatible. Refresh/login/revocation behavior is unchanged. Production calendar integration remains blocked on ordering and DELETE safety.
+Unattempted journals now receive a fresh identity and current schedule at batch start. Existing attempted identities still go through cancellation and absence verification before replacement. Non-JSON calendar responses retain their HTTP status for diagnosis. OAuth service deployment is unchanged; Worker 0.4.0 remains compatible.
 
-Update BRAT; open the panel; Run complete test batch; observe the updated and superseded alert times; save cancellation checkpoint; restart once; Resume batch after restart and export. See test-kit/Complete Test Run.md.
+Update through BRAT, then Run complete test batch. If it stops, share the automatically exported report. The underlying live 0.4.0 failure remains undiagnosed until the new phase/status report is available; this release does not claim a calendar-provider fix.
 
-Validation: 55 mocked checks, browser build, Workers runtime, and Worker deployment dry-run.
+Validation: 58 mocked checks and browser build.
