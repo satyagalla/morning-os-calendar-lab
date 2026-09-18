@@ -1,5 +1,7 @@
 # Morning OS Calendar Lab
 
+Latest beta: **0.3.3** disables stale DELETE in the combined ETag probe after a live iOS request unexpectedly returned 204. Use **Test stale update (PATCH ETags only)** for a fresh notification event. Conditional DELETE is unverified and must not be relied on for production safety. Explicit cancellation remains a destructive lab action. Earlier version descriptions below document historical behavior.
+
 Latest beta: **0.3.2** adds **Start fresh event test**. After cancellation is fenced locally and the old event is absent/cancelled at the provider, it archives that event's identity, timing and cancellation record and prepares a new identity in the same calendar. This action makes no provider writes; choose an event creation button afterwards. Existing login and journals remain compatible.
 
 Latest beta: **0.3.1**. Adds **Show saved event timing** and **Inspect saved event (read only)** for existing journals. A 0.3.0 cancellation message could mean either HTTP 410 Gone or an explicitly cancelled event; use inspection to distinguish them. Existing saved login remains compatible; no Worker update is needed.

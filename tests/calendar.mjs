@@ -63,9 +63,10 @@ await check("failed insert retried at same ID; conflict resolves through owned G
   f.intercept(async r => { if (r.path.includes("/events/") && r.method === "GET" && once) { once = false; return { status: 404, data: {} }; } });
   await f.make().recoverEvent(); assert.equal(f.event().id, id); assert.ok(f.log.at(-1).includes("PASS"));
 });
-await check("fresh PATCH and stale PATCH/DELETE preserve newest event", async () => {
+await check("fresh and stale PATCH preserve newest event without any DELETE", async () => {
   const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent(); await p.staleWrites();
   assert.ok(f.log.at(-1).includes("ETag probes: PASS")); assert.ok(f.event().summary.includes("revision"));
+  assert.equal(f.calls.filter(r => r.method === "DELETE").length, 0);
 });
 await check("interrupted cancellation survives restart and prevents recreation", async () => {
   const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent(); await p.cancelEvent(true);

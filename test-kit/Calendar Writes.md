@@ -1,5 +1,7 @@
 # Dedicated calendar probes
 
+**0.3.3 correction:** the ETag button now tests PATCH only and sends no DELETE. Live 0.3.2 stale DELETE returned 204, destroying the test event rather than rejecting the stale ETag. PATCH passed in that run; conditional DELETE remains blocked for production until transport/provider behavior is isolated. For the cancelled 0.3.2 event: restore login, Recover event to record its fence, Start fresh event test, then create/recover a new notification event. Do not run the older destructive ETag button. Earlier DELETE expectations below describe the original test, not a validated result.
+
 For an existing cancelled test in 0.3.2+: restore login, select **Start fresh event test**, then resume step 4 below. This checks the old event's absence/cancelled state and retains its cancellation record before allocating a new identity. An active event or unsuccessful provider read blocks preparation; complete cancellation recovery first. No new calendar is created. Do not cancel the fresh event before testing ETags and observing its alert.
 
 Use only the Calendar Lab plugin and a Google test account. Enable the Google Calendar API in the same Google Cloud project before testing. The existing Worker and `calendar.app.created` scope are reused; no broader scope or Worker deployment is needed. Each button performs explicit foreground work; there are no background schedules.

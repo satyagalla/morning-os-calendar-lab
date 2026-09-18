@@ -1,7 +1,5 @@
-Calendar Lab 0.3.2 adds Start fresh event test.
+Calendar Lab 0.3.3 removes stale DELETE from the combined ETag probe after live iOS testing returned 204 rather than the expected 412. PATCH-only testing verifies stale update rejection while preserving the notification event. Conditional DELETE remains unsafe/unverified; this release does not fix or claim to fix the transport/provider discrepancy. Explicit cancellation still deletes the disposable test event.
 
-After the current event has a saved cancellation fence and the provider reports it absent/cancelled, this explicit action retains its identity, timing, and cancellation record and allocates a new event identity in the same calendar. It makes no provider writes. Active events, failed provider checks, and repeated preparation are blocked. Old journals and saved login remain compatible. No Cloudflare update needed.
+Resume: restore login; inspect/recover the previous event to record its cancellation; Start fresh event test; Create event and simulate lost reply; Recover event; Test stale update (PATCH ETags only); Show saved event timing; export. Observe notifications before explicit cancellation.
 
-Test order: Restore saved login; Start fresh event test; Create event and simulate lost reply; Recover event or pending cancellation; Test stale update and delete (ETags); Show saved event timing; export results. Observe the calendar alert with Obsidian closed before cancelling.
-
-Validation: 49 mocked checks and TypeScript/browser build. Provider ETags and notification delivery still require live device testing. Cross-device ordering remains unimplemented.
+Validation: 49 mocked checks and browser build. Existing Worker, credentials and journals remain compatible. No service update needed. Production publishing remains blocked.

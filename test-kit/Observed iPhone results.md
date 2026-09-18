@@ -1,5 +1,9 @@
 # Observed iPhone results
 
+## Live stale DELETE failure: 0.3.2
+
+User report September 18, 2026: restore PASS at 09:22:44; fresh event preparation PASS at 09:22:53 with one old cancellation record retained; simulated lost insert reply at 09:23:03; recovery PASS at 09:23:12. At 09:23:21 stale DELETE returned HTTP 204 rather than 412. The probe reached DELETE only after fresh PATCH succeeded, its ETag changed, and stale PATCH returned 412. Thus PATCH preconditions worked in this run, but the DELETE request path did not reject the stale version. Header transmission versus provider behavior is not yet isolated. The DELETE likely explains the earlier cancelled test event, but that earlier cause remains unconfirmed. Notification delivery is not established. 0.3.3 removes destructive DELETE from the ETag/notification probe; production conditional deletion remains blocked.
+
 User-reported results on 2026-09-18. Plugin 0.1.0, Obsidian 1.12.7, iOS, America/New_York. OS version not supplied. These are manual reports, not independently observed automation.
 
 - Web Crypto random generation and SHA-256 known vector: PASS.

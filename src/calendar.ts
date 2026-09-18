@@ -190,11 +190,9 @@ export class CalendarProbe {
       const current = this.ownedEvent(j, update.data); if (current.etag === old.etag) throw new Error("ETag unchanged");
       const stale = await this.request({ method: "PATCH", path, etag: String(old.etag), body: { summary: "STALE WRITE SHOULD NOT APPLY" } });
       if (stale.status !== 412) { this.report(`Stale PATCH: FAIL; expected 412, got ${stale.status}. Stop testing and inspect the disposable event.`); return; }
-      const staleDelete = await this.request({ method: "DELETE", path, etag: String(old.etag) });
-      if (staleDelete.status !== 412) { this.report(`Stale DELETE: FAIL; expected 412, got ${staleDelete.status}. Stop testing and inspect the disposable event.`); return; }
       const final = await this.request({ method: "GET", path });
       if (final.status !== 200 || this.ownedEvent(j, final.data).summary !== summary) throw new Error("Latest update lost");
-      this.report("ETag probes: PASS; fresh PATCH succeeded, stale PATCH and DELETE rejected with 412, latest event preserved. Simulated clients on one device only.");
+      this.report("ETag probes: PASS for PATCH only; fresh PATCH succeeded, stale PATCH rejected with 412, latest event preserved. DELETE probe disabled after live iOS returned 204 for a stale ETag. Conditional DELETE remains unsafe/unverified.");
     });
   }
   async cancelEvent(interrupt = false): Promise<void> {
