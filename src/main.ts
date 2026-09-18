@@ -46,6 +46,7 @@ export default class CalendarLab extends Plugin {
   readonly calendar = new CalendarProbe(async ({ method, path, body, etag }) => {
     const token = await this.auth.accessToken();
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (method === "GET") headers["Cache-Control"] = "no-cache";
     if (body) headers["Content-Type"] = "application/json";
     if (etag) headers["If-Match"] = etag;
     const response = await requestUrl({ url: "https://www.googleapis.com/calendar/v3" + path, method, headers,

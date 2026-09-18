@@ -38,8 +38,6 @@ export class CalendarProbe {
     await this.run(async () => {
       this.phase = "verify dedicated calendar";
       let j = await this.ownedCalendar();
-      const absent = (r: Reply, id: string) => r.status === 404 || r.status === 410 ||
-        (r.status === 200 && record(r.data).id === id && record(r.data).status === "cancelled");
       const allocate = () => {
         const retired = j.attempted ? [...(j.retired ?? []), { event: j.event, start: j.start, end: j.end, attempted: j.attempted, observed: j.observed, cancel: true as const }] : j.retired;
         if ((retired?.length ?? 0) > 100) throw new ProbeError("History limit");
@@ -51,14 +49,7 @@ export class CalendarProbe {
       const get = () => this.request({ method: "GET", path: `${this.path(j)}/${j.event}` });
       const finish = async () => {
         j.cancel = true; this.save(j);
-        const r = await get();
-        if (!absent(r, j.event)) {
-          if (r.status !== 200) throw new ProbeError("Read failed");
-          const e = this.ownedEvent(j, r.data);
-          const d = await this.request({ method: "DELETE", path: `${this.path(j)}/${j.event}`, etag: String(e.etag) });
-          if (d.status !== 204) throw new ProbeError("Delete failed");
-        }
-        if (!absent(await get(), j.event)) throw new ProbeError("Cancellation unconfirmed");
+        await this.cancelOwned(j);
       };
       if (j.attempted) { this.phase = "recover previous event cancellation"; await finish(); allocate(); }
       else allocate();
@@ -307,16 +298,29 @@ export class CalendarProbe {
     });
   }
   private async cancelOwned(j: Journal): Promise<void> {
-    const path = `${this.path(j)}/${j.event}`, response = await this.request({ method: "GET", path });
-    if (response.status === 404 || response.status === 410 || (response.status === 200 && record(response.data).status === "cancelled")) {
-      this.report("Cancellation recovery: PASS; event already absent/cancelled. Local cancellation intent retained."); return;
+    if (!j.cancel) throw new ProbeError("Cancellation intent missing");
+    const path = `${this.path(j)}/${j.event}`;
+    const absent = (r: Reply) => r.status === 404 || r.status === 410 ||
+      (r.status === 200 && record(r.data).id === j.event && record(r.data).status === "cancelled");
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const response = await this.request({ method: "GET", path });
+      if (absent(response)) {
+        this.report("Cancellation recovery: PASS; event already absent/cancelled. Local cancellation intent retained."); return;
+      }
+      if (response.status !== 200) throw new ProbeError("Cancellation read failed");
+      // Explicit disposal of this lab identity remains intended after a revision change.
+      // Revalidate ownership and shape on every retry; never remove If-Match.
+      const event = this.ownedEvent(j, response.data);
+      const deleted = await this.request({ method: "DELETE", path, etag: String(event.etag) });
+      if (deleted.status === 412) {
+        this.report(`Cancellation revision conflict: HTTP 412; attempt ${attempt}/3. ${attempt < 3 ? "Re-read and revalidate before retry." : "Stopping; intent retained."}`);
+        if (attempt === 3) throw new ProbeError("Cancellation conflict retry limit");
+        continue;
+      }
+      if (deleted.status !== 204 && deleted.status !== 404 && deleted.status !== 410) throw new ProbeError("Cancellation delete failed");
+      const check = await this.request({ method: "GET", path });
+      if (!absent(check)) throw new ProbeError("Deletion not confirmed");
+      this.report("Cancellation: PASS; deletion and provider absence verified. DELETE precondition safety and cross-device ordering remain unproven."); return;
     }
-    if (response.status !== 200) throw new ProbeError("Cancellation read failed");
-    const event = this.ownedEvent(j, response.data);
-    const deleted = await this.request({ method: "DELETE", path, etag: String(event.etag) });
-    if (deleted.status !== 204) { this.report(`Cancellation unconfirmed (HTTP ${deleted.status}); intent retained. Retry Recover event.`); return; }
-    const check = await this.request({ method: "GET", path });
-    if (check.status !== 404 && check.status !== 410 && !(check.status === 200 && record(check.data).status === "cancelled")) throw new ProbeError("Deletion not confirmed");
-    this.report("Cancellation: PASS; deletion and provider absence verified. DELETE precondition safety and cross-device ordering remain unproven.");
   }
 }

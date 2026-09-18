@@ -202,7 +202,7 @@ await check("batch reports failed cleanup phase and HTTP status without provider
   assert.equal(await p.batch(), false);
   assert.ok(f.log.at(-1).includes("recover previous event cancellation"));
   assert.ok(f.log.at(-1).includes("GET event: HTTP 403"));
-  assert.ok(f.log.at(-1).includes("Read failed"));
+  assert.ok(f.log.at(-1).includes("Cancellation read failed"));
   assert.ok(!f.log.join().includes("private-provider-value"));
   assert.equal(f.calls.filter(r => r.method === "DELETE").length, 0);
 });
@@ -222,5 +222,44 @@ await check("unattempted old journal receives a fresh current batch schedule", a
   const first = f.calls.find(r => r.method === "POST" && r.path.endsWith("/events"));
   assert.ok(Date.parse(first.body.start.dateTime) > Date.now());
   assert.notEqual(first.body.id, old.event);
+});
+await check("cancellation conflict re-reads a changed revision before retry", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  let once = true;
+  f.intercept(async r => {
+    if (r.method === "DELETE" && once) { once = false; f.setEvent({ ...f.event(), etag: '\"new-revision\"' }); return { status: 412, data: {} }; }
+  });
+  await p.cancelEvent();
+  const deletes = f.calls.filter(r => r.method === "DELETE");
+  assert.equal(deletes.length, 2); assert.notEqual(deletes[0].etag, deletes[1].etag);
+  assert.equal(f.event(), null); assert.ok(f.store.read().cancel);
+});
+await check("persistent cancellation conflicts stop after three guarded attempts", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  const oldId = f.store.read().event;
+  f.intercept(async r => r.method === "DELETE" ? { status: 412, data: {} } : undefined);
+  assert.equal(await p.batch(), false);
+  assert.equal(f.calls.filter(r => r.method === "DELETE").length, 3);
+  assert.equal(f.store.read().event, oldId); assert.ok(f.store.read().cancel);
+  assert.ok(f.log.at(-1).includes("retry limit")); assert.ok(f.log.at(-1).includes("HTTP 412"));
+});
+await check("ownership change after a cancellation conflict blocks the next delete", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  f.intercept(async r => {
+    if (r.method === "DELETE") {
+      f.setEvent({ ...f.event(), extendedProperties: { private: { mosLabOwner: "other" } } });
+      return { status: 412, data: {} };
+    }
+  });
+  await p.cancelEvent();
+  assert.equal(f.calls.filter(r => r.method === "DELETE").length, 1);
+  assert.ok(f.event()); assert.ok(f.log.at(-1).includes("ownership or shape mismatch"));
+});
+await check("batch recovers a previous event conflict then reaches notification", async () => {
+  const f = fixture(), p = f.make(); await p.createCalendar(); await p.createEvent();
+  let once = true;
+  f.intercept(async r => { if (r.method === "DELETE" && once) { once = false; return { status: 412, data: {} }; } });
+  assert.equal(await p.batch(), true);
+  assert.equal(f.event().summary, "Morning OS Calendar Lab UPDATED notification");
 });
 console.log(`${passed} calendar checks passed (mocked Google; live provider behavior remains untested).`);

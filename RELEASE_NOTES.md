@@ -1,7 +1,7 @@
-Calendar Lab 0.4.1 fixes diagnostic reporting for batches that stop before creating the notification event. Reports now identify the batch phase, request method, endpoint category, HTTP status (if received), and a bounded local validation failure. Raw provider responses, exception messages, URLs and credentials are omitted. Failed batches automatically export the report.
+Calendar Lab 0.4.2 adds bounded recovery for HTTP 412 while cancelling the previous test event, the failure observed on iOS in 0.4.1. Batch cleanup and restart recovery now use the same cancellation path: persist intent, read the event, validate ownership and shape, delete with that revision's If-Match, and verify absence. A 412 triggers a new read and ownership check, up to three DELETE attempts. Persistent conflicts stop the batch and retain the identity and cancellation intent. No unconditional delete is used.
 
-Unattempted journals now receive a fresh identity and current schedule at batch start. Existing attempted identities still go through cancellation and absence verification before replacement. Non-JSON calendar responses retain their HTTP status for diagnosis. OAuth service deployment is unchanged; Worker 0.4.0 remains compatible.
+Calendar GET requests now request cache revalidation. This does not establish whether caching caused the observed failure. Earlier stale DELETE results and multi-device ordering limitations remain unresolved. Worker 0.4.0 remains compatible; no service update is needed.
 
-Update through BRAT, then Run complete test batch. If it stops, share the automatically exported report. The underlying live 0.4.0 failure remains undiagnosed until the new phase/status report is available; this release does not claim a calendar-provider fix.
+Update through BRAT, reload the plugin, then Run complete test batch. The batch will retry cancellation of the retained old identity before creating the notification event. If it stops, share the automatically exported report.
 
-Validation: 58 mocked checks and browser build.
+Validation: 62 mocked checks and browser build, including changed revision, persistent conflict, ownership change and batch continuation cases. Live device recovery remains to be confirmed.
